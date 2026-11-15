@@ -65,6 +65,29 @@ public sealed class FakeWindowSystem : IWindowSystem
 
     public void Raise(WindowEventKind kind, FakeWindow window) => WindowEvent?.Invoke(new WindowEvent(kind, window.Handle));
 
+    /// <summary>
+    /// The window is destroyed but its Destroyed event hasn't been delivered yet (the real one is
+    /// queued). Raise it later with <see cref="Raise"/>, which then refers to a stale handle.
+    /// </summary>
+    public void CloseWithEventPending(FakeWindow window)
+    {
+        _windows.Remove(window);
+        window.IsGone = true;
+    }
+
+    /// <summary>
+    /// A new window that gets the handle of <paramref name="gone"/>, a window already destroyed
+    /// (HWNDs are recycled). Like <see cref="Open"/>, it is shown unless <paramref name="show"/> is false.
+    /// </summary>
+    public FakeWindow OpenWithReusedHandle(FakeWindow gone, FakeProcess process, WindowStyle style, Rect outer, bool show = true)
+    {
+        if (!gone.IsGone) throw new InvalidOperationException("Only a destroyed window's handle can be reused.");
+        var window = new FakeWindow(gone.Handle, process, style, outer);
+        _windows.Add(window);
+        if (show) Show(window);
+        return window;
+    }
+
     public IReadOnlyList<WindowHandle> TopLevelWindows() => _windows.Select(w => w.Handle).ToList();
 
     public WindowInfo? Describe(WindowHandle handle)

@@ -26,11 +26,15 @@ public enum TrackedState
 }
 
 /// <summary>A game window the controller is tracking: one per game process.</summary>
+/// <param name="ProcessId">With <paramref name="ProcessPath"/>, who the window belongs to: a
+/// window handle can be reused by another window once this one is destroyed, so the controller
+/// checks both before it changes the window behind a handle.</param>
 /// <param name="Original">The window's frame before the controller first touched it.</param>
 /// <param name="HadCaption">Whether the window had a title bar when it was first seen.</param>
 public sealed record TrackedWindow(
     WindowHandle Window,
     int ProcessId,
+    string? ProcessPath,
     GameEntry Game,
     TrackedState State,
     WindowFrame Original,
@@ -95,17 +99,25 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
                 Consider(e.Window);
                 break;
             case WindowEventKind.Destroyed:
-                // A game that has exited needs no restore.
-                _tracked.Remove(e.Window);
+                // A game that has exited needs no restore. Destroy events arrive queued, so the
+                // handle may already belong to a newer window we track: keep that one.
+                if (_tracked.TryGetValue(e.Window, out var tracked) && !IsStillTheSameWindow(tracked, windows.Describe(e.Window)))
+                    _tracked.Remove(e.Window);
                 break;
         }
     }
 
     private void Consider(WindowHandle handle)
     {
-        if (_tracked.ContainsKey(handle)) return;
         var info = windows.Describe(handle);
-        if (info is null || !IsCandidate(info)) return;
+        if (info is null) return;
+        if (_tracked.TryGetValue(handle, out var known))
+        {
+            if (IsStillTheSameWindow(known, info)) return;
+            // The tracked window is gone and another window has its handle: forget the old one.
+            _tracked.Remove(handle);
+        }
+        if (!IsCandidate(info)) return;
         var game = games.FindEnabled(info.ProcessPath);
         if (game is null) return;
 
@@ -155,13 +167,20 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
             }
         }
 
-        _tracked[info.Handle] = new TrackedWindow(info.Handle, info.ProcessId, game, state, info.Frame, info.Style.HasCaption, info.Client.Size);
+        _tracked[info.Handle] = new TrackedWindow(info.Handle, info.ProcessId, info.ProcessPath, game, state, info.Frame, info.Style.HasCaption, info.Client.Size);
     }
 
     /// <summary>Put a tracked window back as it was. False when that failed and should be tried again.</summary>
     private bool TryRestore(TrackedWindow tracked)
     {
         if (tracked.State is not (TrackedState.Restyled or TrackedState.RestorePending)) return true;
+        // A window that has gone needs nothing back, and its handle may now be another program's window.
+        if (!IsStillTheSameWindow(tracked, windows.Describe(tracked.Window))) return true;
         return windows.SetFrame(tracked.Window, tracked.Original) is ChangeResult.Ok or ChangeResult.WindowGone;
     }
+
+    /// <summary>Whether the window behind a tracked handle is still the one that was tracked.</summary>
+    private static bool IsStillTheSameWindow(TrackedWindow tracked, WindowInfo? now) =>
+        now is not null && now.ProcessId == tracked.ProcessId
+        && string.Equals(now.ProcessPath, tracked.ProcessPath, StringComparison.OrdinalIgnoreCase);
 }

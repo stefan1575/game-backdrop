@@ -378,6 +378,71 @@ public sealed class BackdropControllerTests
     }
 
     [Fact]
+    public void Quitting_leaves_alone_another_program_that_got_an_exited_game_s_window_handle()
+    {
+        var controller = StartController();
+        var game = _desktop.OpenWindowed(_desktop.StartProcess(Dota), new Size(800, 600));
+        _desktop.CloseWithEventPending(game);
+        var otherRect = new Rect(300, 300, 900, 800);
+        var other = _desktop.OpenWithReusedHandle(game, _desktop.StartProcess(Notepad), FakeWindowSystem.Captioned, otherRect, show: false);
+        other.IsVisible = true;
+
+        controller.Stop();
+
+        AssertUntouched(other, new WindowFrame(FakeWindowSystem.Captioned, otherRect));
+    }
+
+    [Fact]
+    public void Replacing_a_splash_leaves_alone_another_program_that_got_the_splash_s_handle()
+    {
+        StartController();
+        var process = _desktop.StartProcess(Novel);
+        var splash = _desktop.Open(process, FakeWindowSystem.Captioned, new Rect(100, 100, 500, 400));
+        _desktop.CloseWithEventPending(splash);
+        var otherRect = new Rect(300, 300, 900, 800);
+        var other = _desktop.OpenWithReusedHandle(splash, _desktop.StartProcess(Notepad), FakeWindowSystem.Captioned, otherRect, show: false);
+        other.IsVisible = true;
+
+        var game = _desktop.OpenWindowed(process, new Size(1280, 720));
+
+        Assert.False(game.HasBorder);
+        AssertUntouched(other, new WindowFrame(FakeWindowSystem.Captioned, otherRect));
+    }
+
+    [Fact]
+    public void A_late_destroy_event_for_a_reused_handle_does_not_forget_the_game_now_using_it()
+    {
+        var old = _desktop.OpenWindowed(_desktop.StartProcess(Dota), new Size(800, 600), show: false);
+        _desktop.CloseWithEventPending(old);
+        var game = _desktop.OpenWithReusedHandle(old, _desktop.StartProcess(Dota), FakeWindowSystem.Captioned,
+            Rect.FromPosition(50, 60, new Size(816, 639)), show: false);
+        game.IsVisible = true;
+        var controller = StartController();
+        Assert.False(game.HasBorder);
+
+        _desktop.Raise(WindowEventKind.Destroyed, old);
+        controller.Stop();
+
+        AssertUntouched(game, new WindowFrame(FakeWindowSystem.Captioned, Rect.FromPosition(50, 60, new Size(816, 639))));
+    }
+
+    [Fact]
+    public void A_game_window_that_gets_a_tracked_window_s_old_handle_is_handled_as_new()
+    {
+        var controller = StartController();
+        var old = _desktop.OpenWindowed(_desktop.StartProcess(Dota), new Size(800, 600));
+        _desktop.CloseWithEventPending(old); // its Destroyed event is lost or still queued
+
+        var novel = _desktop.OpenWithReusedHandle(old, _desktop.StartProcess(Novel), FakeWindowSystem.Captioned,
+            Rect.FromPosition(70, 80, new Size(1296, 759)));
+
+        Assert.False(novel.HasBorder);
+        Assert.Equal(Rect.FromPosition(320, 180, new Size(1280, 720)), novel.Outer);
+        controller.Stop();
+        AssertUntouched(novel, new WindowFrame(FakeWindowSystem.Captioned, Rect.FromPosition(70, 80, new Size(1296, 759))));
+    }
+
+    [Fact]
     public void After_quitting_new_game_windows_are_left_alone()
     {
         var controller = StartController();
