@@ -191,6 +191,62 @@ public sealed class BackdropTests
     }
 
     [Fact]
+    public void A_game_hidden_and_shown_again_covers_the_taskbar_again_while_it_is_in_front()
+    {
+        var controller = StartController();
+        var game = OpenGame();
+
+        _desktop.Hide(game);
+        _desktop.Show(game);
+
+        Assert.True(_desktop.TaskbarCovered(Primary));
+        OpenOtherApp();
+        Assert.False(_desktop.TaskbarCovered(Primary));
+        _desktop.UserActivates(game);
+        Assert.True(_desktop.TaskbarCovered(Primary));
+
+        controller.Stop();
+        Assert.False(game.IsMarkedFullscreen);
+    }
+
+    [Fact]
+    public void A_game_that_hides_and_shows_its_window_while_keeping_the_foreground_covers_the_taskbar_again()
+    {
+        StartController();
+        var game = OpenGame();
+
+        _desktop.HideKeepingForeground(game);
+        _desktop.ShowStillForeground(game);
+
+        Assert.True(_desktop.TaskbarCovered(Primary));
+        Assert.Same(BackdropOver(Primary), _desktop.DirectlyBehind(game));
+    }
+
+    [Fact]
+    public void A_failed_mark_after_the_game_is_shown_again_leaves_its_backdrop_and_the_next_activation_marks_it()
+    {
+        var controller = StartController();
+        var game = OpenGame();
+        var other = OpenOtherApp();
+        _desktop.UserActivates(game);
+        _desktop.Hide(game);
+        _desktop.FailNextMarks(game, 2); // the marks on Shown and on Foreground
+
+        _desktop.Show(game);
+
+        Assert.False(_desktop.TaskbarCovered(Primary));
+        var backdrop = BackdropOver(Primary);
+        Assert.Equal([game, backdrop, other], _desktop.ZOrder(game, backdrop, other));
+
+        _desktop.UserActivates(other);
+        _desktop.UserActivates(game);
+        Assert.True(_desktop.TaskbarCovered(Primary));
+
+        Assert.Empty(controller.Stop());
+        Assert.False(game.IsMarkedFullscreen);
+    }
+
+    [Fact]
     public void A_click_on_the_backdrop_brings_the_game_back_with_the_backdrop_directly_behind_it()
     {
         StartController();

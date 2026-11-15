@@ -138,6 +138,9 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
         switch (e.Kind)
         {
             case WindowEventKind.Foreground:
+                ShowBackdrop(tracked, info);
+                MarkAgain(tracked);
+                break;
             case WindowEventKind.MinimizeEnd:
                 ShowBackdrop(tracked, info);
                 break;
@@ -165,6 +168,7 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
         {
             // The same window shown again: it keeps its backdrop, and its first original.
             ShowBackdrop(known, live);
+            MarkAgain(known);
             return;
         }
         // Not tracked, or the tracked window is gone (and forgotten): whatever has the handle now is new.
@@ -262,6 +266,20 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
         tracked = tracked with { Backdrop = windows.CreateBackdrop() };
         ShowBackdrop(tracked, info);
         return tracked with { MarkedFullscreen = windows.MarkFullscreen(tracked.Window, true) == ChangeResult.Ok };
+    }
+
+    /// <summary>
+    /// Tell the shell again that a restyled game with a backdrop is fullscreen. Explorer forgets
+    /// the mark when the window is hidden (it drops the taskbar tab) and when Explorer restarts,
+    /// so this runs each time the game is shown again or comes to the foreground; the call is
+    /// cheap and idempotent. A failed re-mark changes nothing: the next one tries again. Callers
+    /// have just checked the handle (TryGetLive).
+    /// </summary>
+    private void MarkAgain(TrackedWindow tracked)
+    {
+        if (tracked.State != TrackedState.Restyled || tracked.Backdrop is null) return;
+        if (windows.MarkFullscreen(tracked.Window, true) == ChangeResult.Ok && !tracked.MarkedFullscreen)
+            _tracked[tracked.Window] = tracked with { MarkedFullscreen = true };
     }
 
     /// <summary>Show the game's backdrop over its monitor, directly behind it, if the game is on screen.</summary>

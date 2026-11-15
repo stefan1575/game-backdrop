@@ -87,12 +87,36 @@ public sealed class FakeWindowSystem : IWindowSystem
         Raise(WindowEventKind.Foreground, window);
     }
 
-    /// <summary>The window hides itself (Hidden); the foreground passes on if it had it.</summary>
+    /// <summary>
+    /// The window hides itself (Hidden); the foreground passes on if it had it. As Explorer does,
+    /// the shell drops the hidden window's taskbar tab and forgets its fullscreen mark.
+    /// </summary>
     public void Hide(FakeWindow window)
     {
-        window.IsVisible = false;
-        Raise(WindowEventKind.Hidden, window);
+        HideKeepingForeground(window);
         if (Foreground == window) PassForeground();
+    }
+
+    /// <summary>
+    /// The window hides itself (Hidden) but stays the foreground window, as a window hidden with
+    /// SW_HIDE by its own thread was measured to on Windows 11. The shell still forgets its mark.
+    /// </summary>
+    public void HideKeepingForeground(FakeWindow window)
+    {
+        window.IsVisible = false;
+        window.IsMarkedFullscreen = false;
+        Raise(WindowEventKind.Hidden, window);
+    }
+
+    /// <summary>
+    /// A hidden window that kept the foreground is shown again (SW_SHOW): only Shown, since the
+    /// foreground doesn't change.
+    /// </summary>
+    public void ShowStillForeground(FakeWindow window)
+    {
+        if (Foreground != window) throw new InvalidOperationException("Only a window that kept the foreground.");
+        window.IsVisible = true;
+        Raise(WindowEventKind.Shown, window);
     }
 
     /// <summary>The user brings the window to the foreground (alt-tab, a click, its taskbar button).</summary>
