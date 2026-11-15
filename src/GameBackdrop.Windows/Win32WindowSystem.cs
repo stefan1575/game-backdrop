@@ -169,10 +169,11 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
         // among the ordinary windows. While the game is the foreground it goes to their top: it is
         // ordered behind the game, then demoted below (HWND_NOTOPMOST puts a topmost window right
         // below every topmost window). HWND_TOP can't do this: Windows ignores it from a process
-        // that isn't the foreground, as this app isn't. Otherwise it stays where it is
-        // (HWND_NOTOPMOST leaves a window that isn't topmost in place), so it never covers the
-        // ordinary window the user switched to.
-        var insertAfter = !IsTopmost(behind.Value) || foreground ? behind.Value : HWND_NOTOPMOST;
+        // that isn't the foreground, as this app isn't. Otherwise it goes to the bottom of the Z
+        // order, so it never covers the window the user is in: its own place is no safe one (a
+        // new window made while the app holds the foreground starts above every ordinary window).
+        // When the game comes to the front, its Foreground event brings the backdrop up.
+        var insertAfter = !IsTopmost(behind.Value) || foreground ? behind.Value : HWND_BOTTOM;
         SetWindowPos(backdrop.Value, insertAfter, bounds.Left, bounds.Top, bounds.Width, bounds.Height,
             SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOOWNERZORDER);
         // Demote a backdrop that is topmost now: ordered behind a topmost game in front, or behind

@@ -258,6 +258,58 @@ public sealed class Win32WindowSystemTests : IDisposable
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_new_backdrop_behind_a_topmost_window_in_the_background_stays_below_the_active_app(bool appHoldsTheForeground)
+    {
+        // The game is topmost, but the user is in an ordinary app: the tray app started, or the
+        // game was shown, while they were elsewhere. A fresh backdrop has no safe place to keep.
+        // Where Windows creates it depends on who holds the foreground (measured on Windows 11):
+        // made by a process in the background, a new window goes directly below the foreground
+        // window; made while the app's own process holds the foreground (as just after it is
+        // launched), it goes to the top of the ordinary windows, above the active app. The first
+        // case is the ordinary test window as the active app; the second, a small window of this
+        // process, with the ordinary test window also open. The backdrop is 16x16, at the topmost
+        // target's corner, to keep this unobtrusive.
+        using var targetProcess = StartTestWindow("--size 320x240");
+        var target = WaitFor(() => TestWindowOf(targetProcess.Id), "the topmost window to open");
+        nint ownWindow = 0;
+        try
+        {
+            Assert.True(SetWindowPos(target, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE));
+            if (appHoldsTheForeground)
+            {
+                ownWindow = CreateWindowEx(0, "STATIC", "Game Backdrop test", WS_POPUP | WS_VISIBLE, 0, 0, 16, 16, 0, 0, 0, 0);
+                Assert.NotEqual(0, ownWindow);
+            }
+            var active = appHoldsTheForeground ? ownWindow : _hwnd;
+            if (!TryMakeForeground(active)) { NotChecked("the active window could not take the foreground"); return; }
+            if (!IsTopmost(target) || GetForegroundWindow() != active) { NotChecked("the foreground or the target changed under the test"); return; }
+            Assert.True(GetWindowRect(target, out var corner));
+            var bounds = new Rect(corner.Left, corner.Top, corner.Left + 16, corner.Top + 16);
+            var backdrop = _windows.CreateBackdrop();
+            string Order() => $"target Z {ZIndex(target)}, backdrop Z {ZIndex(backdrop.Value)}, active app Z {ZIndex(active)}, ordinary window Z {ZIndex(_hwnd)}";
+            _output.WriteLine($"created: {Order()}");
+
+            _windows.ShowBackdrop(backdrop, bounds, new WindowHandle(target));
+
+            _output.WriteLine($"shown: {Order()}");
+            var exStyle = (uint)GetWindowLongPtr(backdrop.Value, GWL_EXSTYLE);
+            Assert.True((exStyle & WS_EX_TOPMOST) == 0, $"never topmost (ex-style 0x{exStyle:X8})");
+            Assert.True(IsWindowVisible(backdrop.Value));
+            Assert.True(ZIndex(backdrop.Value) > ZIndex(active), $"below the active app ({Order()})");
+            Assert.True(ZIndex(backdrop.Value) > ZIndex(_hwnd), $"below the ordinary window ({Order()})");
+            Assert.Equal(active, GetForegroundWindow());
+        }
+        finally
+        {
+            SetWindowPos(target, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            targetProcess.Kill();
+            if (ownWindow != 0) DestroyWindow(ownWindow);
+        }
+    }
+
     private static bool IsTopmost(nint hwnd) => ((uint)GetWindowLongPtr(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
 
     [Fact]
@@ -438,6 +490,10 @@ public sealed class Win32WindowSystemTests : IDisposable
     [DllImport("user32.dll")] private static extern nint GetTopWindow(nint hwnd);
     [DllImport("user32.dll")] private static extern bool SetWindowPos(nint hwnd, nint insertAfter, int x, int y, int cx, int cy, uint flags);
     [DllImport("user32.dll")] private static extern void keybd_event(byte vk, byte scan, uint flags, nint extraInfo);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "CreateWindowExW")]
+    private static extern nint CreateWindowEx(uint exStyle, string className, string? windowName, uint style, int x, int y, int width, int height, nint parent, nint menu, nint instance, nint param);
+    [DllImport("user32.dll")] private static extern bool DestroyWindow(nint hwnd);
+    private const uint WS_POPUP = 0x80000000, WS_VISIBLE = 0x10000000;
     private const nint HWND_TOP = 0, HWND_TOPMOST = -1, HWND_NOTOPMOST = -2;
     private const uint SWP_NOSIZE = 0x1, SWP_NOMOVE = 0x2, SWP_NOACTIVATE = 0x10;
     private const byte VK_MENU = 0x12;

@@ -55,10 +55,11 @@ public interface IWindowSystem
     /// Cover <paramref name="bounds"/> exactly (a monitor's full bounds, taskbar area included)
     /// and show the backdrop without activating it, ordered directly behind
     /// <paramref name="behind"/> in the Z order. It is never topmost, and a window directly
-    /// behind a topmost one would be topmost itself: so behind a topmost window that is the
+    /// behind a topmost one would be topmost itself. So behind a topmost window that is the
     /// foreground, it goes to the top of the non-topmost windows (right below every topmost
-    /// window), and behind a topmost window that isn't, it keeps its place in the Z order (so it
-    /// never covers the window the user switched to). If <paramref name="behind"/>
+    /// window); behind a topmost window that isn't, it goes to the bottom of the Z order, so it
+    /// never covers the window the user is in, and comes up the next time it is shown behind that
+    /// window while it is the foreground. If <paramref name="behind"/>
     /// is the foreground window, it is first put in front of the other windows of its band, where
     /// Windows is about to put it anyway; any other window keeps its place.
     /// </summary>

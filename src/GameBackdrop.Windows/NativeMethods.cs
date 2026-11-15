@@ -14,6 +14,7 @@ internal static class NativeMethods
     public const int GWL_EXSTYLE = -20;
 
     public const nint HWND_TOP = 0;
+    public const nint HWND_BOTTOM = 1;
     public const nint HWND_NOTOPMOST = -2;
 
     public const uint SWP_NOSIZE = 0x0001;
