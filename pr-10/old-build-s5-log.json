@@ -1,0 +1,18 @@
+[
+  {
+    "name": "s5-before",
+    "scene": "S5 before: wrapped-menu test window, app not running",
+    "style": "0x14CF0000",
+    "ex": "0x00000100",
+    "outer": "(100,100) 416x659",
+    "client": "(108,170) 400x581"
+  },
+  {
+    "name": "s5-old-build-restyled",
+    "scene": "S5 on the old build (6a1d44f): bottom of the client area cut off",
+    "style": "0x14020000",
+    "ex": "0x00000000",
+    "outer": "(1080,419) 400x601",
+    "client": "(1080,458) 400x562"
+  }
+]

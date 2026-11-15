@@ -1,0 +1,90 @@
+[
+  {
+    "name": "01-windowed-before",
+    "scene": "1. Windowed test window, app not running",
+    "style": "0x14CF0000",
+    "ex": "0x00000100",
+    "outer": "(100,100) 816x639",
+    "client": "(108,131) 800x600"
+  },
+  {
+    "name": "04-menu-before",
+    "scene": "4. Test window with a one-row menu bar, app not running",
+    "style": "0x14CF0000",
+    "ex": "0x00000100",
+    "outer": "(100,100) 816x659",
+    "client": "(108,151) 800x600"
+  },
+  {
+    "name": "06-wrapped-menu-before",
+    "scene": "6. Narrow test window whose 14-item menu wraps, app not running",
+    "style": "0x14CF0000",
+    "ex": "0x00000100",
+    "outer": "(100,100) 416x659",
+    "client": "(108,170) 400x581"
+  },
+  {
+    "name": "02-windowed-restyled",
+    "scene": "2. App started: border stripped, centred at its own size",
+    "style": "0x14020000",
+    "ex": "0x00000000",
+    "outer": "(880,420) 800x600",
+    "client": "(880,420) 800x600"
+  },
+  {
+    "name": "05-menu-restyled",
+    "scene": "5. Menu bar kept, client area still 800x600, centred",
+    "style": "0x14020000",
+    "ex": "0x00000000",
+    "outer": "(880,410) 800x620",
+    "client": "(880,430) 800x600"
+  },
+  {
+    "name": "07-wrapped-menu-restyled",
+    "scene": "7. Wrapped menu: client area kept (yellow border intact)",
+    "style": "0x14020000",
+    "ex": "0x00000000",
+    "outer": "(1080,410) 400x620",
+    "client": "(1080,449) 400x581"
+  },
+  {
+    "name": "08-fullscreen-untouched",
+    "scene": "8. Borderless-fullscreen test window opened while the app runs: left alone",
+    "style": "0x94000000",
+    "ex": "0x00000000",
+    "outer": "(0,0) 2560x1440",
+    "client": "(0,0) 2560x1440"
+  },
+  {
+    "name": "03-windowed-restored",
+    "scene": "3. App quit from its tray menu: original frame back",
+    "style": "0x14CF0000",
+    "ex": "0x00000100",
+    "outer": "(100,100) 816x639",
+    "client": "(108,131) 800x600"
+  },
+  {
+    "name": "05b-menu-restored",
+    "scene": "5b. After quit: menu window back as it was",
+    "style": "0x14CF0000",
+    "ex": "0x00000100",
+    "outer": "(100,100) 816x659",
+    "client": "(108,151) 800x600"
+  },
+  {
+    "name": "07b-wrapped-menu-restored",
+    "scene": "7b. After quit: wrapped-menu window back as it was",
+    "style": "0x14CF0000",
+    "ex": "0x00000100",
+    "outer": "(100,100) 416x659",
+    "client": "(108,170) 400x581"
+  },
+  {
+    "name": "08b-fullscreen-after-quit",
+    "scene": "8b. After quit: fullscreen window still untouched",
+    "style": "0x94000000",
+    "ex": "0x00000000",
+    "outer": "(0,0) 2560x1440",
+    "client": "(0,0) 2560x1440"
+  }
+]
