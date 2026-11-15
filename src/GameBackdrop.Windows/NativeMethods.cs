@@ -14,6 +14,7 @@ internal static class NativeMethods
     public const int GWL_EXSTYLE = -20;
 
     public const nint HWND_TOP = 0;
+    public const nint HWND_NOTOPMOST = -2;
 
     public const uint SWP_NOSIZE = 0x0001;
     public const uint SWP_NOMOVE = 0x0002;
@@ -29,6 +30,7 @@ internal static class NativeMethods
     public const uint PM_NOREMOVE = 0x0000;
     public const int SW_HIDE = 0;
     public const int SW_SHOWMINNOACTIVE = 7;
+    public const uint WS_EX_TOPMOST = 0x00000008;
     public const uint WS_EX_TOOLWINDOW = 0x00000080;
     public const uint WS_EX_NOACTIVATE = 0x08000000;
     public const uint WS_POPUP = 0x80000000;

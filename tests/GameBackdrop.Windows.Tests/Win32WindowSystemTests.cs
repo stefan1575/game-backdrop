@@ -5,22 +5,27 @@ using System.Text;
 using GameBackdrop.Core.Geometry;
 using GameBackdrop.Core.Layout;
 using GameBackdrop.Core.WindowSystem;
+using Xunit.Abstractions;
 
 namespace GameBackdrop.Windows.Tests;
 
 /// <summary>
 /// The Win32 port against real windows: each test starts its own <c>TestWindow.exe</c> (another
 /// process, because the port skips its own process's window events) and kills it afterwards.
+/// A test that can't set up what it checks here (the foreground, a shell taskbar) passes without
+/// checking and says so in its output (<c>dotnet test --logger "console;verbosity=detailed"</c>).
 /// </summary>
 public sealed class Win32WindowSystemTests : IDisposable
 {
+    private readonly ITestOutputHelper _output;
     private readonly Process _testWindow;
     private readonly nint _hwnd;
     private readonly Win32WindowSystem _windows;
     private readonly List<WindowEvent> _events = [];
 
-    public Win32WindowSystemTests()
+    public Win32WindowSystemTests(ITestOutputHelper output)
     {
+        _output = output;
         // The port posts its events to the current SynchronizationContext; this one runs them at
         // once, on this thread, which also owns the hooks.
         SynchronizationContext.SetSynchronizationContext(new RunAtOnce());
@@ -145,9 +150,9 @@ public sealed class Win32WindowSystemTests : IDisposable
         try
         {
             // A test process in the background may not take the foreground: then there is nothing to check.
-            if (!TryMakeForeground(_hwnd)) return;
+            if (!TryMakeForeground(_hwnd)) { NotChecked("the test window could not take the foreground"); return; }
             SetWindowPos(_hwnd, other, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-            if (GetForegroundWindow() != _hwnd || ZIndex(other) > ZIndex(_hwnd)) return;
+            if (GetForegroundWindow() != _hwnd || ZIndex(other) > ZIndex(_hwnd)) { NotChecked("the foreground or the order changed under the test"); return; }
             var bounds = _windows.Describe(new WindowHandle(_hwnd))!.Monitor.Bounds;
             var backdrop = _windows.CreateBackdrop();
 
@@ -177,9 +182,9 @@ public sealed class Win32WindowSystemTests : IDisposable
         var foreground = WaitFor(() => TestWindowOf(foregroundProcess.Id), "the foreground test window to open");
         try
         {
-            if (!TryMakeForeground(foreground)) return;
+            if (!TryMakeForeground(foreground)) { NotChecked("the third window could not take the foreground"); return; }
             SetWindowPos(_hwnd, other, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-            if (GetForegroundWindow() != foreground || ZIndex(other) > ZIndex(_hwnd)) return;
+            if (GetForegroundWindow() != foreground || ZIndex(other) > ZIndex(_hwnd)) { NotChecked("the foreground or the order changed under the test"); return; }
             var bounds = _windows.Describe(new WindowHandle(_hwnd))!.Monitor.Bounds;
             var backdrop = _windows.CreateBackdrop();
 
@@ -194,6 +199,66 @@ public sealed class Win32WindowSystemTests : IDisposable
             foregroundProcess.Kill();
         }
     }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_backdrop_shown_behind_a_topmost_window_stays_out_of_the_topmost_band(bool targetIsForeground)
+    {
+        // A windowed game can be topmost (Borderless keeps the bit). Ordered directly behind it,
+        // the backdrop would sit above any topmost window below the game, and Windows makes a
+        // window ordered there topmost too. Here two test windows are topmost, the target above
+        // the other. The backdrop is 16x16, at the target's corner, to keep this unobtrusive.
+        // The foreground goes to the target, or else to the other topmost window (where Windows
+        // would honour a raise of the backdrop over the ordinary windows). No input is sent to get
+        // it: the test asks (SetForegroundWindow, and the last window started often gets it
+        // anyway), and when Windows refuses there is nothing to check.
+        using var firstProcess = StartTestWindow("--size 320x240");
+        var first = WaitFor(() => TestWindowOf(firstProcess.Id), "the first topmost window to open");
+        using var lastProcess = StartTestWindow("--size 320x240");
+        var last = WaitFor(() => TestWindowOf(lastProcess.Id), "the last topmost window to open");
+        var (target, anchor) = targetIsForeground ? (last, first) : (first, last);
+        try
+        {
+            Assert.True(SetWindowPos(anchor, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE));
+            Assert.True(SetWindowPos(target, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE));
+            Assert.True(IsTopmost(target) && IsTopmost(anchor), "both test windows are topmost");
+            Assert.True(ZIndex(target) < ZIndex(anchor), "the target is above the other topmost window");
+            SetForegroundWindow(targetIsForeground ? target : anchor);
+            Thread.Sleep(200);
+            if ((GetForegroundWindow() == target) != targetIsForeground)
+            {
+                NotChecked(targetIsForeground ? "the target did not get the foreground" : "the target got the foreground");
+                return;
+            }
+            Assert.True(GetWindowRect(target, out var corner));
+            var bounds = new Rect(corner.Left, corner.Top, corner.Left + 16, corner.Top + 16);
+            var backdrop = _windows.CreateBackdrop();
+            // First directly behind an ordinary window, so the test sees whether it is raised.
+            _windows.ShowBackdrop(backdrop, bounds, new WindowHandle(_hwnd));
+            Assert.True(ZIndex(backdrop.Value) > ZIndex(_hwnd));
+
+            _windows.ShowBackdrop(backdrop, bounds, new WindowHandle(target));
+
+            var exStyle = (uint)GetWindowLongPtr(backdrop.Value, GWL_EXSTYLE);
+            Assert.True((exStyle & WS_EX_TOPMOST) == 0, $"never topmost (ex-style 0x{exStyle:X8})");
+            Assert.True(IsWindowVisible(backdrop.Value));
+            Assert.True(ZIndex(backdrop.Value) > ZIndex(anchor), "below both topmost windows");
+            if (targetIsForeground)
+                Assert.True(ZIndex(backdrop.Value) < ZIndex(_hwnd), "the game in front: raised over the ordinary windows");
+            else
+                Assert.True(ZIndex(backdrop.Value) > ZIndex(_hwnd), "the game not in front: not raised over the ordinary windows");
+        }
+        finally
+        {
+            SetWindowPos(target, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            SetWindowPos(anchor, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            firstProcess.Kill();
+            lastProcess.Kill();
+        }
+    }
+
+    private static bool IsTopmost(nint hwnd) => ((uint)GetWindowLongPtr(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
 
     [Fact]
     public void Showing_a_backdrop_does_not_take_the_foreground()
@@ -263,7 +328,7 @@ public sealed class Win32WindowSystemTests : IDisposable
     {
         // xUnit 2 has no runtime skip: with no shell taskbar (a CI runner without Explorer) there
         // is nothing to tell, so the test passes without checking.
-        if (FindWindow("Shell_TrayWnd", null) == 0) return;
+        if (FindWindow("Shell_TrayWnd", null) == 0) { NotChecked("no shell taskbar"); return; }
         var handle = new WindowHandle(_hwnd);
 
         Assert.Equal(ChangeResult.Ok, _windows.MarkFullscreen(handle, true));
@@ -281,6 +346,9 @@ public sealed class Win32WindowSystemTests : IDisposable
         Assert.Equal(ChangeResult.WindowGone, _windows.MarkFullscreen(handle, true));
         Assert.Equal(ChangeResult.WindowGone, _windows.Activate(handle));
     }
+
+    /// <summary>The test passes without checking: say why, so a run shows which tests checked nothing.</summary>
+    private void NotChecked(string why) => _output.WriteLine($"NOT CHECKED: {why}.");
 
     /// <summary>
     /// Make <paramref name="hwnd"/> the foreground window. A process in the background may not
@@ -370,7 +438,7 @@ public sealed class Win32WindowSystemTests : IDisposable
     [DllImport("user32.dll")] private static extern nint GetTopWindow(nint hwnd);
     [DllImport("user32.dll")] private static extern bool SetWindowPos(nint hwnd, nint insertAfter, int x, int y, int cx, int cy, uint flags);
     [DllImport("user32.dll")] private static extern void keybd_event(byte vk, byte scan, uint flags, nint extraInfo);
-    private const nint HWND_TOP = 0;
+    private const nint HWND_TOP = 0, HWND_TOPMOST = -1, HWND_NOTOPMOST = -2;
     private const uint SWP_NOSIZE = 0x1, SWP_NOMOVE = 0x2, SWP_NOACTIVATE = 0x10;
     private const byte VK_MENU = 0x12;
     private const uint KEYEVENTF_KEYUP = 0x2;

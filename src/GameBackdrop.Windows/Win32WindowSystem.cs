@@ -159,13 +159,25 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
         // Windows makes a window the foreground (and reports it) a moment before the window's own
         // thread raises it, longer for a busy game: ordered behind it in that gap, the backdrop
         // would stay under every window the game then jumps over. So the foreground window is put
-        // at the top of the non-topmost band first, where Windows is about to put it anyway.
+        // at the top of its band (topmost or not) first, where Windows is about to put it anyway.
         // Any other window keeps its place.
-        if (GetForegroundWindow() == behind.Value)
+        var foreground = GetForegroundWindow() == behind.Value;
+        if (foreground)
             SetWindowPos(behind.Value, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
-        SetWindowPos(backdrop.Value, behind.Value, bounds.Left, bounds.Top, bounds.Width, bounds.Height,
+        // A window ordered directly behind a topmost one becomes topmost itself (it is then above
+        // any topmost window below that one), so behind a topmost game the backdrop stays among
+        // the ordinary windows: at their top while the game is the foreground (HWND_TOP, right
+        // below every topmost window), else where it is (HWND_NOTOPMOST leaves a window that
+        // isn't topmost in place), so it never covers the ordinary window the user switched to.
+        var insertAfter = !IsTopmost(behind.Value) ? behind.Value : foreground ? HWND_TOP : HWND_NOTOPMOST;
+        SetWindowPos(backdrop.Value, insertAfter, bounds.Left, bounds.Top, bounds.Width, bounds.Height,
             SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOOWNERZORDER);
+        // A guard for a game that turns topmost between the check and the call.
+        if (IsTopmost(backdrop.Value))
+            SetWindowPos(backdrop.Value, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
     }
+
+    private static bool IsTopmost(nint hwnd) => ((uint)GetWindowLongPtr(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
 
     public void HideBackdrop(BackdropHandle backdrop)
     {
