@@ -4,8 +4,11 @@ using GameBackdrop.Core.WindowSystem;
 namespace GameBackdrop.Core.Tests;
 
 /// <summary>
-/// A scripted desktop: monitors, windows with styles and rects, and the events they raise. Tests
-/// act on it the way a user or a game would, then look at the windows' final state.
+/// A scripted desktop: monitors, windows with styles and rects, one Z order (windows and
+/// backdrops), a foreground window, and the events they raise. Tests act on it the way a user or a
+/// game would, then look at the desktop's final state. As on Windows, the port's own calls never
+/// raise an event from inside the call: the events they cause are queued and delivered after the
+/// event or click being handled returns.
 /// </summary>
 public sealed class FakeWindowSystem : IWindowSystem
 {
@@ -40,11 +43,15 @@ public sealed class FakeWindowSystem : IWindowSystem
     /// <summary>Every backdrop the port has made, destroyed ones included.</summary>
     public Dictionary<BackdropHandle, FakeBackdrop> Backdrops { get; } = [];
 
-    /// <summary>The windows the shell has been told are fullscreen.</summary>
-    public HashSet<WindowHandle> MarkedFullscreen { get; } = [];
+    /// <summary>The foreground window, or null when no window has it.</summary>
+    public FakeWindow? Foreground { get; private set; }
 
-    /// <summary>The window last brought to the foreground with <see cref="Activate"/>.</summary>
-    public WindowHandle? Foreground { get; private set; }
+    // Front first: FakeWindows and FakeBackdrops. Hidden ones keep their place.
+    private readonly List<object> _zOrder = [];
+
+    // Events the port's own calls caused, delivered after the current event or click returns.
+    private readonly Queue<(WindowEventKind Kind, FakeWindow Window)> _posted = new();
+    private bool _delivering;
 
     private nint _nextBackdrop = 0xB000;
 
@@ -65,14 +72,58 @@ public sealed class FakeWindowSystem : IWindowSystem
     {
         var window = new FakeWindow(new WindowHandle(_nextHandle++), process, style, outer, _nextLifetime++) { Owner = owner, HasMenu = menu, MenuRows = menuRows };
         _windows.Add(window);
+        _zOrder.Insert(0, window);
         if (show) Show(window);
         return window;
     }
 
+    /// <summary>The window is shown: it comes to the front and gets the foreground (Shown, then Foreground).</summary>
     public void Show(FakeWindow window)
     {
         window.IsVisible = true;
+        ToFront(window);
+        Foreground = window;
         Raise(WindowEventKind.Shown, window);
+        Raise(WindowEventKind.Foreground, window);
+    }
+
+    /// <summary>The window hides itself (Hidden); the foreground passes on if it had it.</summary>
+    public void Hide(FakeWindow window)
+    {
+        window.IsVisible = false;
+        Raise(WindowEventKind.Hidden, window);
+        if (Foreground == window) PassForeground();
+    }
+
+    /// <summary>The user brings the window to the foreground (alt-tab, a click, its taskbar button).</summary>
+    public void UserActivates(FakeWindow window)
+    {
+        ToFront(window);
+        Foreground = window;
+        Raise(WindowEventKind.Foreground, window);
+    }
+
+    /// <summary>The user minimises the window (MinimizeStart); the foreground passes to the next window.</summary>
+    public void Minimise(FakeWindow window)
+    {
+        window.IsMinimized = true;
+        Raise(WindowEventKind.MinimizeStart, window);
+        if (Foreground == window) PassForeground();
+    }
+
+    /// <summary>The user restores the minimised window: MinimizeEnd, then it comes to the front with the foreground.</summary>
+    public void Restore(FakeWindow window)
+    {
+        window.IsMinimized = false;
+        Raise(WindowEventKind.MinimizeEnd, window);
+        UserActivates(window);
+    }
+
+    /// <summary>The user (or the game) moves the window (LocationChanged).</summary>
+    public void Move(FakeWindow window, Rect outer)
+    {
+        window.Outer = outer;
+        Raise(WindowEventKind.LocationChanged, window);
     }
 
     /// <summary>The window closes (or its process exits).</summary>
@@ -80,6 +131,19 @@ public sealed class FakeWindowSystem : IWindowSystem
     {
         CloseWithEventPending(window);
         Raise(WindowEventKind.Destroyed, window);
+    }
+
+    private void PassForeground()
+    {
+        var leaving = Foreground;
+        Foreground = _zOrder.OfType<FakeWindow>().FirstOrDefault(w => w.IsVisible && !w.IsMinimized && w != leaving);
+        if (Foreground is not null) Raise(WindowEventKind.Foreground, Foreground);
+    }
+
+    private void ToFront(object item)
+    {
+        _zOrder.Remove(item);
+        _zOrder.Insert(0, item);
     }
 
     /// <summary>
@@ -100,7 +164,17 @@ public sealed class FakeWindowSystem : IWindowSystem
     public void RaiseStale(WindowEventKind kind, FakeWindow window)
     {
         var lifetime = kind == WindowEventKind.Destroyed ? window.Lifetime : _lifetimes.GetValueOrDefault(window.Handle);
-        WindowEvent?.Invoke(new WindowEvent(kind, window.Handle, lifetime));
+        Deliver(() => WindowEvent?.Invoke(new WindowEvent(kind, window.Handle, lifetime)));
+    }
+
+    /// <summary>Run one delivery, then deliver whatever the port's calls queued meanwhile, in order.</summary>
+    private void Deliver(Action delivery)
+    {
+        if (_delivering) throw new InvalidOperationException("An event was raised from inside a handler; the port never does that.");
+        _delivering = true;
+        try { delivery(); }
+        finally { _delivering = false; }
+        if (_posted.TryDequeue(out var next)) Raise(next.Kind, next.Window);
     }
 
     /// <summary>
@@ -112,7 +186,10 @@ public sealed class FakeWindowSystem : IWindowSystem
     public void CloseWithEventPending(FakeWindow window)
     {
         _windows.Remove(window);
+        _zOrder.Remove(window);
         window.IsGone = true;
+        window.IsMarkedFullscreen = false; // the shell forgets a destroyed window
+        if (Foreground == window) Foreground = null;
         _destroyedNotYetSeen.Add(window);
     }
 
@@ -132,6 +209,7 @@ public sealed class FakeWindowSystem : IWindowSystem
         if (!gone.IsGone) throw new InvalidOperationException("Only a destroyed window's handle can be reused.");
         var window = new FakeWindow(gone.Handle, process, style, outer, _nextLifetime++);
         _windows.Add(window);
+        _zOrder.Insert(0, window);
         if (show) Show(window);
         return window;
     }
@@ -170,22 +248,28 @@ public sealed class FakeWindowSystem : IWindowSystem
         }
         w.Style = frame.Style;
         w.Outer = frame.Outer;
+        _posted.Enqueue((WindowEventKind.LocationChanged, w));
         return ChangeResult.Ok;
     }
 
     public BackdropHandle CreateBackdrop()
     {
         var handle = new BackdropHandle(_nextBackdrop++);
-        Backdrops[handle] = new FakeBackdrop();
+        var backdrop = new FakeBackdrop(handle);
+        Backdrops[handle] = backdrop;
+        _zOrder.Insert(0, backdrop);
         return handle;
     }
 
     public void ShowBackdrop(BackdropHandle backdrop, Rect bounds, WindowHandle behind)
     {
         if (!Backdrops.TryGetValue(backdrop, out var b) || b.IsDestroyed) return;
+        var window = Find(behind);
+        if (window is null) return; // SetWindowPos fails on a stale insert-after handle
         b.Bounds = bounds;
-        b.Behind = behind;
         b.IsVisible = true;
+        _zOrder.Remove(b);
+        _zOrder.Insert(_zOrder.IndexOf(window) + 1, b);
     }
 
     public void HideBackdrop(BackdropHandle backdrop)
@@ -198,25 +282,61 @@ public sealed class FakeWindowSystem : IWindowSystem
         if (!Backdrops.TryGetValue(backdrop, out var b)) return;
         b.IsVisible = false;
         b.IsDestroyed = true;
+        _zOrder.Remove(b);
     }
 
     public ChangeResult MarkFullscreen(WindowHandle window, bool fullscreen)
     {
-        if (Find(window) is null) return ChangeResult.WindowGone;
-        if (fullscreen) MarkedFullscreen.Add(window);
-        else MarkedFullscreen.Remove(window);
+        var w = Find(window);
+        if (w is null) return ChangeResult.WindowGone;
+        if (w.FailedMarks > 0)
+        {
+            w.FailedMarks--;
+            return ChangeResult.Failed;
+        }
+        w.IsMarkedFullscreen = fullscreen;
         return ChangeResult.Ok;
     }
 
     public ChangeResult Activate(WindowHandle window)
     {
-        if (Find(window) is null) return ChangeResult.WindowGone;
-        Foreground = window;
+        var w = Find(window);
+        if (w is null) return ChangeResult.WindowGone;
+        ToFront(w);
+        Foreground = w;
+        _posted.Enqueue((WindowEventKind.Foreground, w));
         return ChangeResult.Ok;
     }
 
     /// <summary>The user clicks the black of a backdrop.</summary>
-    public void ClickBackdrop(BackdropHandle backdrop) => BackdropClicked?.Invoke(backdrop);
+    public void ClickBackdrop(BackdropHandle backdrop) => Deliver(() => BackdropClicked?.Invoke(backdrop));
+
+    /// <summary>The next <paramref name="count"/> MarkFullscreen calls on the window fail (the shell call errs).</summary>
+    public void FailNextMarks(FakeWindow window, int count = 1) => window.FailedMarks += count;
+
+    /// <summary>
+    /// Whether the taskbar on <paramref name="monitor"/> is hidden behind a window: as Explorer
+    /// does it, when the foreground window is marked fullscreen and is on that monitor.
+    /// </summary>
+    public bool TaskbarCovered(MonitorInfo monitor) =>
+        Foreground is { IsMarkedFullscreen: true } w && MonitorOf(w.Outer) == monitor;
+
+    /// <summary>The visible backdrops that cover any part of <paramref name="monitor"/>.</summary>
+    public IReadOnlyList<FakeBackdrop> VisibleBackdropsOn(MonitorInfo monitor) =>
+        Backdrops.Values.Where(b => b.IsVisible && Overlaps(b.Bounds, monitor.Bounds)).ToList();
+
+    /// <summary>The window or backdrop directly behind <paramref name="item"/> in the Z order, or null.</summary>
+    public object? DirectlyBehind(object item)
+    {
+        var index = _zOrder.IndexOf(item);
+        return index >= 0 && index + 1 < _zOrder.Count ? _zOrder[index + 1] : null;
+    }
+
+    /// <summary>The given windows and backdrops, front first.</summary>
+    public IReadOnlyList<object> ZOrder(params object[] items) =>
+        _zOrder.Where(items.Contains).ToList();
+
+    private static bool Overlaps(Rect a, Rect b) => a.Left < b.Right && b.Left < a.Right && a.Top < b.Bottom && b.Top < a.Bottom;
 
     /// <summary>The next SetFrame calls on <paramref name="window"/> return these results instead of succeeding.</summary>
     public void FailNextChanges(FakeWindow window, params ChangeResult[] results)
@@ -236,12 +356,11 @@ public sealed class FakeWindowSystem : IWindowSystem
 }
 
 /// <summary>A backdrop as the fake port last left it.</summary>
-public sealed class FakeBackdrop
+public sealed class FakeBackdrop(BackdropHandle handle)
 {
+    public BackdropHandle Handle { get; } = handle;
     public Rect Bounds { get; set; }
     public bool IsVisible { get; set; }
-    /// <summary>The window it was last shown directly behind.</summary>
-    public WindowHandle? Behind { get; set; }
     public bool IsDestroyed { get; set; }
 }
 
@@ -263,6 +382,12 @@ public sealed class FakeWindow(WindowHandle handle, FakeProcess process, WindowS
     public bool IsVisible { get; set; }
     public bool IsMinimized { get; set; }
     public bool IsGone { get; set; }
+
+    /// <summary>The shell has been told this window is fullscreen (MarkFullscreen).</summary>
+    public bool IsMarkedFullscreen { get; set; }
+
+    /// <summary>How many more MarkFullscreen calls on this window fail.</summary>
+    public int FailedMarks { get; set; }
     public WindowHandle? Owner { get; init; }
     public Queue<ChangeResult> ScriptedResults { get; } = new();
 
