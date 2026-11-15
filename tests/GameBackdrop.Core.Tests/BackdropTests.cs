@@ -361,6 +361,28 @@ public sealed class BackdropTests
     }
 
     [Fact]
+    public void A_game_window_that_goes_fullscreen_while_its_splash_is_put_back_is_left_to_its_own_mode()
+    {
+        StartController();
+        var process = _desktop.StartProcess(Novel);
+        _desktop.OpenPopup(process, new Rect(100, 100, 500, 400));
+        var game = _desktop.OpenWindowed(process, new Size(1280, 720), show: false);
+        // While the splash is being put back, the game switches itself to borderless fullscreen.
+        _desktop.DuringNext(PortCall.SetFrame, () =>
+        {
+            game.Style = FakeWindowSystem.Popup;
+            game.Outer = Primary.Bounds;
+        });
+
+        _desktop.Show(game);
+
+        Assert.Equal(Primary.Bounds, game.Outer);
+        Assert.Equal(FakeWindowSystem.Popup, game.Style);
+        Assert.False(game.IsMarkedFullscreen);
+        Assert.Empty(_desktop.VisibleBackdropsOn(Primary));
+    }
+
+    [Fact]
     public void A_game_already_running_when_the_app_starts_gets_a_backdrop()
     {
         var game = OpenGame();

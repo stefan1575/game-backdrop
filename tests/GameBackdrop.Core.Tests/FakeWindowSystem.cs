@@ -3,8 +3,12 @@ using GameBackdrop.Core.WindowSystem;
 
 namespace GameBackdrop.Core.Tests;
 
-/// <summary>The port calls a test can script something into (<see cref="FakeWindowSystem.DuringNext"/>, <see cref="FakeWindowSystem.ThrowOnNext"/>).</summary>
-public enum PortCall { SetFrame, CreateBackdrop, ShowBackdrop, MarkFullscreen }
+/// <summary>
+/// The port's calls: the ones a test can script something into (<see cref="FakeWindowSystem.DuringNext"/>,
+/// <see cref="FakeWindowSystem.ThrowOnNext"/>) first, then the rest, which the fake also numbers
+/// (<see cref="FakeWindowSystem.AfterCall"/>).
+/// </summary>
+public enum PortCall { SetFrame, CreateBackdrop, ShowBackdrop, MarkFullscreen, TopLevelWindows, Describe, OuterSizeFor, HideBackdrop, DestroyBackdrop, Activate }
 
 /// <summary>
 /// A scripted desktop: monitors, windows with styles and rects, one Z order (windows and
@@ -250,9 +254,23 @@ public sealed class FakeWindowSystem : IWindowSystem
         return window;
     }
 
-    public IReadOnlyList<WindowHandle> TopLevelWindows() => _windows.Select(w => w.Handle).ToList();
+    public IReadOnlyList<WindowHandle> TopLevelWindows()
+    {
+        Begin(PortCall.TopLevelWindows);
+        var handles = _windows.Select(w => w.Handle).ToList();
+        End(PortCall.TopLevelWindows);
+        return handles;
+    }
 
     public WindowInfo? Describe(WindowHandle handle)
+    {
+        Begin(PortCall.Describe, handle);
+        var info = DescribeNow(handle);
+        End(PortCall.Describe, handle);
+        return info;
+    }
+
+    private WindowInfo? DescribeNow(WindowHandle handle)
     {
         TakeInDestructions(); // as the port does: Describe's lifetime is current
         var w = Find(handle);
@@ -264,17 +282,19 @@ public sealed class FakeWindowSystem : IWindowSystem
 
     public Size OuterSizeFor(WindowHandle handle, WindowStyle style, Size clientSize)
     {
+        Begin(PortCall.OuterSizeFor, handle);
         // Like AdjustWindowRectEx, this assumes a menu bar of one row.
         var hasMenu = Find(handle)?.HasMenu ?? false;
         var (left, top, right, bottom) = FakeWindow.Insets(style, hasMenu ? 1 : 0);
+        End(PortCall.OuterSizeFor, handle);
         return new Size(clientSize.Width + left + right, clientSize.Height + top + bottom);
     }
 
     public ChangeResult SetFrame(WindowHandle handle, WindowFrame frame)
     {
-        Begin(PortCall.SetFrame);
+        Begin(PortCall.SetFrame, handle);
         var result = ApplyFrame(handle, frame);
-        End(PortCall.SetFrame);
+        End(PortCall.SetFrame, handle);
         return result;
     }
 
@@ -283,6 +303,7 @@ public sealed class FakeWindowSystem : IWindowSystem
         FrameChanges.Add((handle, frame));
         var w = Find(handle);
         if (w is null) return ChangeResult.WindowGone;
+        w.PortChanges.Add(PortCall.SetFrame);
         if (w.Process.Elevated) return ChangeResult.AccessDenied;
         if (w.ScriptedResults.TryDequeue(out var scripted))
         {
@@ -309,9 +330,9 @@ public sealed class FakeWindowSystem : IWindowSystem
 
     public void ShowBackdrop(BackdropHandle backdrop, Rect bounds, WindowHandle behind)
     {
-        Begin(PortCall.ShowBackdrop);
+        Begin(PortCall.ShowBackdrop, behind);
         Order(backdrop, bounds, behind);
-        End(PortCall.ShowBackdrop);
+        End(PortCall.ShowBackdrop, behind);
     }
 
     private void Order(BackdropHandle backdrop, Rect bounds, WindowHandle behind)
@@ -323,28 +344,35 @@ public sealed class FakeWindowSystem : IWindowSystem
         b.Bounds = bounds;
         b.IsVisible = true;
         window.BackdropsShownBehind++;
+        window.PortChanges.Add(PortCall.ShowBackdrop);
         _zOrder.Remove(b);
         _zOrder.Insert(_zOrder.IndexOf(window) + 1, b);
     }
 
     public void HideBackdrop(BackdropHandle backdrop)
     {
+        Begin(PortCall.HideBackdrop);
         if (Backdrops.TryGetValue(backdrop, out var b)) b.IsVisible = false;
+        End(PortCall.HideBackdrop);
     }
 
     public void DestroyBackdrop(BackdropHandle backdrop)
     {
-        if (!Backdrops.TryGetValue(backdrop, out var b)) return;
-        b.IsVisible = false;
-        b.IsDestroyed = true;
-        _zOrder.Remove(b);
+        Begin(PortCall.DestroyBackdrop);
+        if (Backdrops.TryGetValue(backdrop, out var b))
+        {
+            b.IsVisible = false;
+            b.IsDestroyed = true;
+            _zOrder.Remove(b);
+        }
+        End(PortCall.DestroyBackdrop);
     }
 
     public ChangeResult MarkFullscreen(WindowHandle window, bool fullscreen)
     {
-        Begin(PortCall.MarkFullscreen);
+        Begin(PortCall.MarkFullscreen, window);
         var result = Mark(window, fullscreen);
-        End(PortCall.MarkFullscreen);
+        End(PortCall.MarkFullscreen, window);
         return result;
     }
 
@@ -352,6 +380,7 @@ public sealed class FakeWindowSystem : IWindowSystem
     {
         var w = Find(window);
         if (w is null) return ChangeResult.WindowGone;
+        w.PortChanges.Add(PortCall.MarkFullscreen);
         if (w.FailedMarks > 0)
         {
             w.FailedMarks--;
@@ -363,8 +392,17 @@ public sealed class FakeWindowSystem : IWindowSystem
 
     public ChangeResult Activate(WindowHandle window)
     {
+        Begin(PortCall.Activate, window);
+        var result = ActivateNow(window);
+        End(PortCall.Activate, window);
+        return result;
+    }
+
+    private ChangeResult ActivateNow(WindowHandle window)
+    {
         var w = Find(window);
         if (w is null) return ChangeResult.WindowGone;
+        w.PortChanges.Add(PortCall.Activate);
         ToFront(w);
         Foreground = w;
         _posted.Enqueue((WindowEventKind.Foreground, w));
@@ -386,14 +424,64 @@ public sealed class FakeWindowSystem : IWindowSystem
     /// <summary>The next <paramref name="call"/> throws before doing anything, as the port's CreateWindowEx failure does.</summary>
     public void ThrowOnNext(PortCall call) => _throwNext.Add(call);
 
-    private void Begin(PortCall call)
+    /// <summary>Every port call so far, in order, with the window it acts on (for ShowBackdrop, the window it goes behind).</summary>
+    public List<(PortCall Call, WindowHandle? On)> Calls { get; } = [];
+
+    // AfterCall: the number of the call to hand over after, and what to run then.
+    private (int After, Action Action)? _handOver;
+    // A hand-over due after a Describe waits for the next call, to see what that call is.
+    private (WindowHandle Described, Action Action)? _handOverAfterDescribe;
+
+    /// <summary>
+    /// Run <paramref name="action"/> right after the <paramref name="k"/>-th port call from now
+    /// (1 is the next one) returns: the desktop changes between two of the controller's calls (a
+    /// game closes and another program's window gets its handle, <see cref="ReplaceUnderItsHandle"/>).
+    /// One pair of calls is never split: a Describe directly followed by a change on the window it
+    /// described (SetFrame, MarkFullscreen, Activate, or ShowBackdrop behind it). That is the
+    /// controller's check and the change it confirms, as close together as two calls can be;
+    /// nothing makes them one. There the action is dropped and <see cref="HandOverSkipped"/> is set.
+    /// After a Describe that turns out to be the last call, <see cref="FinishHandOver"/> runs it.
+    /// </summary>
+    public void AfterCall(int k, Action action)
     {
+        _handOver = (Calls.Count + k, action);
+        _handOverAfterDescribe = null;
+        HandOverSkipped = false;
+    }
+
+    /// <summary>The <see cref="AfterCall"/> hand-over fell between a Describe and the change it confirms, so it didn't happen.</summary>
+    public bool HandOverSkipped { get; private set; }
+
+    /// <summary>Run a hand-over still waiting after a Describe that turned out to be the last call.</summary>
+    public void FinishHandOver()
+    {
+        if (_handOverAfterDescribe is not { } pending) return;
+        _handOverAfterDescribe = null;
+        pending.Action();
+    }
+
+    private static bool Changes(PortCall call) =>
+        call is PortCall.SetFrame or PortCall.MarkFullscreen or PortCall.Activate or PortCall.ShowBackdrop;
+
+    private void Begin(PortCall call, WindowHandle? on = null)
+    {
+        if (_handOverAfterDescribe is { } pending)
+        {
+            _handOverAfterDescribe = null;
+            if (Changes(call) && on == pending.Described) HandOverSkipped = true;
+            else pending.Action();
+        }
         if (_throwNext.Remove(call)) throw new InvalidOperationException($"{call} failed (scripted).");
     }
 
-    private void End(PortCall call)
+    private void End(PortCall call, WindowHandle? on = null)
     {
         if (_duringNext.Remove(call, out var action)) action();
+        Calls.Add((call, on));
+        if (_handOver is not { } handOver || Calls.Count != handOver.After) return;
+        _handOver = null;
+        if (call == PortCall.Describe) _handOverAfterDescribe = (on!.Value, handOver.Action);
+        else handOver.Action();
     }
 
     /// <summary>
@@ -487,6 +575,12 @@ public sealed class FakeWindow(WindowHandle handle, FakeProcess process, WindowS
 
     /// <summary>The shell has been told this window is fullscreen (MarkFullscreen).</summary>
     public bool IsMarkedFullscreen { get; set; }
+
+    /// <summary>
+    /// The port calls that acted on this window: SetFrame, MarkFullscreen, Activate, and
+    /// ShowBackdrop behind it (failed ones too, and for a backdrop destroyed since).
+    /// </summary>
+    public List<PortCall> PortChanges { get; } = [];
 
     /// <summary>How many times a backdrop has been shown behind this window, even one destroyed since.</summary>
     public int BackdropsShownBehind { get; set; }

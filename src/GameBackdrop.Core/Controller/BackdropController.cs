@@ -58,6 +58,14 @@ public sealed record TrackedWindow(
 /// Turns window events into actions on the window system: a state machine per tracked game
 /// window. Single-threaded: call it, and raise the port's events, from one thread.
 /// </summary>
+/// <remarks>
+/// The rule that keeps it off other programs' windows: a game can close during any port call,
+/// and its handle can go to another window at once. So every call that changes a game's window
+/// (<see cref="IWindowSystem.SetFrame"/>, <see cref="IWindowSystem.ShowBackdrop"/> with the game
+/// as <c>behind</c>, <see cref="IWindowSystem.MarkFullscreen"/>, <see cref="IWindowSystem.Activate"/>)
+/// comes right after a fresh <see cref="IWindowSystem.Describe"/> of that handle that confirms the
+/// lifetime the controller means to act on, with no other port call in between.
+/// </remarks>
 public sealed class BackdropController(IWindowSystem windows, GameList games)
 {
     private readonly Dictionary<WindowHandle, TrackedWindow> _tracked = [];
@@ -187,6 +195,10 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
             var left = TryRestore(current);
             if (left is null) _tracked.Remove(current.Window);
             else _tracked[current.Window] = left with { State = TrackedState.RestorePending };
+            // Putting the splash back took port calls: meanwhile the candidate can have changed,
+            // or closed and its handle gone to another window. Decide on it as it is now.
+            if (DescribeIfStill(info.Handle, info.Lifetime) is not { } now || !IsCandidate(now)) return;
+            info = now;
         }
 
         Track(info, game);
@@ -248,6 +260,8 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
         // menu bar) is added on, and the whole window is centred.
         var style = info.Style.Borderless();
         var outerSize = windows.OuterSizeFor(info.Handle, style, info.Client.Size);
+        // Nothing is changed yet, so a window gone during OuterSizeFor is simply not tracked.
+        if (DescribeIfStill(info.Handle, info.Lifetime) is null) return;
         var result = windows.SetFrame(info.Handle, new WindowFrame(style, Placement.Centre(outerSize, info.Monitor.Bounds)));
         switch (result)
         {
@@ -385,7 +399,14 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
     }
 
     /// <summary>Whether the tracked window is still the one behind its handle, by a fresh Describe.</summary>
-    private bool IsLive(TrackedWindow tracked) => IsStillTheSameWindow(tracked.Lifetime, windows.Describe(tracked.Window));
+    private bool IsLive(TrackedWindow tracked) => DescribeIfStill(tracked.Window, tracked.Lifetime) is not null;
+
+    /// <summary>The window behind <paramref name="handle"/> as it is now, if it is still the one with this lifetime; else null.</summary>
+    private WindowInfo? DescribeIfStill(WindowHandle handle, long lifetime)
+    {
+        var now = windows.Describe(handle);
+        return IsStillTheSameWindow(lifetime, now) ? now : null;
+    }
 
     /// <summary>Whether the window behind a handle is still the one with this lifetime.</summary>
     private static bool IsStillTheSameWindow(long lifetime, [NotNullWhen(true)] WindowInfo? now) => now is not null && now.Lifetime == lifetime;
