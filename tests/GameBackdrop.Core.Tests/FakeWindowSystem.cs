@@ -111,12 +111,15 @@ public sealed class FakeWindowSystem : IWindowSystem
         if (Foreground == window) PassForeground();
     }
 
-    /// <summary>The user restores the minimised window: MinimizeEnd, then it comes to the front with the foreground.</summary>
-    public void Restore(FakeWindow window)
+    /// <summary>
+    /// The minimised window is restored (MinimizeEnd). From the taskbar it then comes to the front
+    /// with the foreground; restored without activation (SW_SHOWNOACTIVATE) it keeps its place.
+    /// </summary>
+    public void Restore(FakeWindow window, bool activate = true)
     {
         window.IsMinimized = false;
         Raise(WindowEventKind.MinimizeEnd, window);
-        UserActivates(window);
+        if (activate) UserActivates(window);
     }
 
     /// <summary>The user (or the game) moves the window (LocationChanged).</summary>
@@ -174,8 +177,14 @@ public sealed class FakeWindowSystem : IWindowSystem
         _delivering = true;
         try { delivery(); }
         finally { _delivering = false; }
-        if (_posted.TryDequeue(out var next)) Raise(next.Kind, next.Window);
+        if (!_posted.TryDequeue(out var next)) return;
+        // A controller that answers its own events with more calls would never settle.
+        if (++_chain > 100) throw new InvalidOperationException("The port's own calls keep causing events: the controller never settles.");
+        try { Raise(next.Kind, next.Window); }
+        finally { _chain--; }
     }
+
+    private int _chain;
 
     /// <summary>
     /// The window is destroyed, but neither the port nor the controller has heard yet: the OS
