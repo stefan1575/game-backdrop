@@ -79,6 +79,20 @@ public sealed class BackdropControllerTests
     }
 
     [Fact]
+    public void A_game_whose_menu_bar_wraps_onto_two_rows_keeps_its_client_size()
+    {
+        StartController();
+        var menu = 2 * FakeWindow.MenuHeight;
+        var outer = Rect.FromPosition(100, 100, new Size(400 + 16, 600 + 31 + menu + 8));
+
+        var game = _desktop.Open(_desktop.StartProcess(Novel), FakeWindowSystem.Captioned, outer, menu: true, menuRows: 2);
+
+        Assert.False(game.HasBorder);
+        Assert.Equal(new Size(400, 600), game.Client.Size);
+        Assert.Equal(Rect.FromPosition(760, 220, new Size(400, 640)), game.Outer);
+    }
+
+    [Fact]
     public void A_game_larger_than_its_monitor_keeps_its_top_left_on_the_monitor()
     {
         StartController();
@@ -453,6 +467,88 @@ public sealed class BackdropControllerTests
         Assert.Equal(Rect.FromPosition(320, 180, new Size(1280, 720)), novel.Outer);
         controller.Stop();
         AssertUntouched(novel, new WindowFrame(FakeWindowSystem.Captioned, Rect.FromPosition(70, 80, new Size(1296, 759))));
+    }
+
+    [Fact]
+    public void A_game_s_new_window_that_gets_its_old_window_s_handle_is_handled_as_new_and_put_back_as_itself()
+    {
+        var controller = StartController();
+        var process = _desktop.StartProcess(Dota);
+        var old = _desktop.OpenWindowed(process, new Size(800, 600), left: 50, top: 60);
+        _desktop.CloseWithEventPending(old);
+        var replacementRect = Rect.FromPosition(200, 250, new Size(1296, 759));
+
+        var replacement = _desktop.OpenWithReusedHandle(old, process, FakeWindowSystem.Captioned, replacementRect);
+        Assert.False(replacement.HasBorder);
+        Assert.Equal(Rect.FromPosition(320, 180, new Size(1280, 720)), replacement.Outer);
+
+        _desktop.Raise(WindowEventKind.Destroyed, old);
+        controller.Stop();
+
+        AssertUntouched(replacement, new WindowFrame(FakeWindowSystem.Captioned, replacementRect));
+    }
+
+    [Fact]
+    public void A_game_minimised_or_disabled_by_its_own_dialog_at_quit_is_still_put_back()
+    {
+        const uint WS_MINIMIZE = 0x20000000, WS_DISABLED = 0x08000000, WS_VISIBLE = 0x10000000;
+        var controller = StartController();
+        var game = _desktop.OpenWindowed(_desktop.StartProcess(Dota), new Size(800, 600), left: 50, top: 60);
+        game.Style = game.Style with { Style = (game.Style.Style | WS_MINIMIZE | WS_DISABLED) & ~WS_VISIBLE };
+
+        Assert.Empty(controller.Stop());
+
+        Assert.True(game.HasBorder);
+        Assert.Equal(Rect.FromPosition(50, 60, new Size(816, 639)), game.Outer);
+    }
+
+    [Fact]
+    public void Quitting_leaves_alone_a_game_s_new_window_with_its_old_window_s_handle_not_yet_seen()
+    {
+        var controller = StartController();
+        var process = _desktop.StartProcess(Dota);
+        var old = _desktop.OpenWindowed(process, new Size(800, 600), left: 50, top: 60);
+        _desktop.CloseWithEventPending(old);
+        var replacementRect = Rect.FromPosition(200, 250, new Size(1296, 759));
+        var replacement = _desktop.OpenWithReusedHandle(old, process, FakeWindowSystem.Captioned, replacementRect, show: false);
+        replacement.IsVisible = true;
+
+        controller.Stop();
+
+        AssertUntouched(replacement, new WindowFrame(FakeWindowSystem.Captioned, replacementRect));
+    }
+
+    [Fact]
+    public void A_late_destroy_event_for_a_game_s_old_window_forgets_it_when_its_new_window_has_the_handle()
+    {
+        var controller = StartController();
+        var process = _desktop.StartProcess(Dota);
+        var old = _desktop.OpenWindowed(process, new Size(800, 600), left: 50, top: 60);
+        _desktop.CloseWithEventPending(old);
+        var replacementRect = Rect.FromPosition(200, 250, new Size(1296, 759));
+        var replacement = _desktop.OpenWithReusedHandle(old, process, FakeWindowSystem.Captioned, replacementRect, show: false);
+        replacement.IsVisible = true;
+
+        _desktop.Raise(WindowEventKind.Destroyed, old);
+
+        Assert.Empty(controller.TrackedWindows);
+        controller.Stop();
+        AssertUntouched(replacement, new WindowFrame(FakeWindowSystem.Captioned, replacementRect));
+    }
+
+    [Fact]
+    public void A_windowed_game_window_that_gets_a_fullscreen_window_s_old_handle_in_the_same_game_is_restyled()
+    {
+        StartController();
+        var process = _desktop.StartProcess(Dota);
+        var fullscreen = _desktop.OpenPopup(process, FakeWindowSystem.Primary.Bounds);
+        _desktop.CloseWithEventPending(fullscreen);
+
+        var windowed = _desktop.OpenWithReusedHandle(fullscreen, process, FakeWindowSystem.Captioned,
+            Rect.FromPosition(100, 100, new Size(816, 639)));
+
+        Assert.False(windowed.HasBorder);
+        Assert.Equal(new Rect(560, 240, 1360, 840), windowed.Outer);
     }
 
     [Fact]

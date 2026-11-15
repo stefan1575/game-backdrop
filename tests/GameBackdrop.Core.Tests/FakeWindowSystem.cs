@@ -41,9 +41,9 @@ public sealed class FakeWindowSystem : IWindowSystem
     /// <summary>Open a frameless popup covering <paramref name="outer"/>.</summary>
     public FakeWindow OpenPopup(FakeProcess process, Rect outer, bool show = true) => Open(process, Popup, outer, show);
 
-    public FakeWindow Open(FakeProcess process, WindowStyle style, Rect outer, bool show = true, WindowHandle? owner = null, bool menu = false)
+    public FakeWindow Open(FakeProcess process, WindowStyle style, Rect outer, bool show = true, WindowHandle? owner = null, bool menu = false, int menuRows = 1)
     {
-        var window = new FakeWindow(new WindowHandle(_nextHandle++), process, style, outer) { Owner = owner, HasMenu = menu };
+        var window = new FakeWindow(new WindowHandle(_nextHandle++), process, style, outer) { Owner = owner, HasMenu = menu, MenuRows = menuRows };
         _windows.Add(window);
         if (show) Show(window);
         return window;
@@ -100,7 +100,9 @@ public sealed class FakeWindowSystem : IWindowSystem
 
     public Size OuterSizeFor(WindowHandle handle, WindowStyle style, Size clientSize)
     {
-        var (left, top, right, bottom) = FakeWindow.Insets(style, Find(handle)?.HasMenu ?? false);
+        // Like AdjustWindowRectEx, this assumes a menu bar of one row.
+        var hasMenu = Find(handle)?.HasMenu ?? false;
+        var (left, top, right, bottom) = FakeWindow.Insets(style, hasMenu ? 1 : 0);
         return new Size(clientSize.Width + left + right, clientSize.Height + top + bottom);
     }
 
@@ -163,19 +165,22 @@ public sealed class FakeWindow(WindowHandle handle, FakeProcess process, WindowS
     /// <summary>The window has a menu bar (a Win32 menu, not a style bit).</summary>
     public bool HasMenu { get; init; }
 
+    /// <summary>How many rows the menu bar wraps onto (a long menu in a narrow window).</summary>
+    public int MenuRows { get; init; } = 1;
+
     public Rect Client
     {
         get
         {
-            var (left, top, right, bottom) = Insets(Style, HasMenu);
+            var (left, top, right, bottom) = Insets(Style, HasMenu ? MenuRows : 0);
             return new Rect(Outer.Left + left, Outer.Top + top, Outer.Right - right, Outer.Bottom - bottom);
         }
     }
 
     /// <summary>The non-client frame on each side of a window with this style.</summary>
-    public static (int Left, int Top, int Right, int Bottom) Insets(WindowStyle style, bool hasMenu)
+    public static (int Left, int Top, int Right, int Bottom) Insets(WindowStyle style, int menuRows)
     {
-        var menu = hasMenu ? MenuHeight : 0;
+        var menu = menuRows * MenuHeight;
         if (style.HasCaption) return (FrameLeft, FrameTop + menu, FrameRight, FrameBottom);
         if ((style.Style & WindowStyle.WS_THICKFRAME) != 0) return (FrameLeft, FrameLeft + menu, FrameRight, FrameBottom);
         return (0, menu, 0, 0);
