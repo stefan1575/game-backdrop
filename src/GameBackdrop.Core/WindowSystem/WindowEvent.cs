@@ -4,6 +4,8 @@ namespace GameBackdrop.Core.WindowSystem;
 public enum WindowEventKind
 {
     Shown,
+    /// <summary>The window was hidden (not minimised: that is <see cref="MinimizeStart"/>).</summary>
+    Hidden,
     Destroyed,
     Foreground,
     LocationChanged,

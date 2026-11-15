@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using System.Text;
 using GameBackdrop.Core.Geometry;
@@ -8,7 +9,8 @@ namespace GameBackdrop.Windows;
 
 /// <summary>
 /// The window system port on Win32: thin calls on window handles, and window events from
-/// SetWinEventHook (out of context, so nothing is loaded into any other process).
+/// SetWinEventHook (out of context, so nothing is loaded into any other process). Backdrops are
+/// raw Win32 windows of this process, owned by the thread that created the port.
 /// Create it on a thread with a message loop and a SynchronizationContext (the WinForms UI
 /// thread); events are posted back to that context, so the controller never runs re-entrantly
 /// inside a Win32 call.
@@ -19,7 +21,7 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
     [
         (EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND),
         (EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZEEND),
-        (EVENT_OBJECT_DESTROY, EVENT_OBJECT_SHOW),
+        (EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE),
         (EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE),
     ];
 
@@ -32,6 +34,17 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
     // hook callback runs here too.
     private readonly Dictionary<nint, long> _lifetimes = [];
     private long _nextLifetime = 1;
+
+    // The backdrop window class is registered once per process; its window procedure finds the
+    // port that made each backdrop here. The delegate is static, so it lives as long as the class.
+    private const string BackdropClass = "GameBackdrop.Backdrop";
+    private static readonly WndProc BackdropProc = OnBackdropMessage;
+    private static readonly Lazy<string> BackdropClassRegistered = new(RegisterBackdropClass);
+    private static readonly ConcurrentDictionary<nint, Win32WindowSystem> BackdropOwners = new();
+    private readonly HashSet<nint> _backdrops = [];
+
+    // The shell's taskbar list, created on first use on this thread.
+    private ITaskbarList2? _taskbar;
 
     // A message nobody ever posts (registered for this alone): CatchUp's PeekMessage filters on
     // it, so it never stops at a posted message.
@@ -51,6 +64,8 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
     }
 
     public event Action<WindowEvent>? WindowEvent;
+
+    public event Action<BackdropHandle>? BackdropClicked;
 
     public IReadOnlyList<WindowHandle> TopLevelWindows()
     {
@@ -126,6 +141,90 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
         return error == ERROR_ACCESS_DENIED ? ChangeResult.AccessDenied : ChangeResult.Failed;
     }
 
+    public BackdropHandle CreateBackdrop()
+    {
+        var hwnd = CreateWindowEx(WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW, BackdropClassRegistered.Value, null, WS_POPUP,
+            0, 0, 0, 0, 0, 0, GetModuleHandle(null), 0);
+        if (hwnd == 0) throw new InvalidOperationException($"CreateWindowEx(backdrop) failed: {Marshal.GetLastPInvokeError()}.");
+        BackdropOwners[hwnd] = this;
+        _backdrops.Add(hwnd);
+        return new BackdropHandle(hwnd);
+    }
+
+    // Show and hide only act on a backdrop this port still holds: a destroyed one's handle may
+    // since belong to another window.
+    public void ShowBackdrop(BackdropHandle backdrop, Rect bounds, WindowHandle behind)
+    {
+        if (!_backdrops.Contains(backdrop.Value)) return;
+        // Windows makes a window the foreground (and reports it) a moment before the window's own
+        // thread raises it, longer for a busy game: ordered behind it in that gap, the backdrop
+        // would stay under every window the game then jumps over. So the foreground window is put
+        // at the top of its band (topmost or not) first, where Windows is about to put it anyway.
+        // Any other window keeps its place.
+        var foreground = GetForegroundWindow() == behind.Value;
+        if (foreground)
+            SetWindowPos(behind.Value, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+        // A window ordered directly behind a topmost one becomes topmost itself (it is then above
+        // any topmost window below that one), so behind a topmost game the backdrop must end up
+        // among the ordinary windows. While the game is the foreground it goes to their top: it is
+        // ordered behind the game, then demoted below (HWND_NOTOPMOST puts a topmost window right
+        // below every topmost window). HWND_TOP can't do this: Windows ignores it from a process
+        // that isn't the foreground, as this app isn't. Otherwise it goes to the bottom of the Z
+        // order, so it never covers the window the user is in: its own place is no safe one (a
+        // new window made while the app holds the foreground starts above every ordinary window).
+        // When the game comes to the front, its Foreground event brings the backdrop up.
+        var insertAfter = !IsTopmost(behind.Value) || foreground ? behind.Value : HWND_BOTTOM;
+        SetWindowPos(backdrop.Value, insertAfter, bounds.Left, bounds.Top, bounds.Width, bounds.Height,
+            SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOOWNERZORDER);
+        // Demote a backdrop that is topmost now: ordered behind a topmost game in front, or behind
+        // a game that turned topmost between the check and the call.
+        if (IsTopmost(backdrop.Value))
+            SetWindowPos(backdrop.Value, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+    }
+
+    private static bool IsTopmost(nint hwnd) => ((uint)GetWindowLongPtr(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
+
+    public void HideBackdrop(BackdropHandle backdrop)
+    {
+        if (_backdrops.Contains(backdrop.Value)) ShowWindow(backdrop.Value, SW_HIDE);
+    }
+
+    public void DestroyBackdrop(BackdropHandle backdrop)
+    {
+        if (!_backdrops.Remove(backdrop.Value)) return;
+        BackdropOwners.TryRemove(backdrop.Value, out _);
+        DestroyWindow(backdrop.Value);
+    }
+
+    public ChangeResult MarkFullscreen(WindowHandle window, bool fullscreen)
+    {
+        if (!IsWindow(window.Value)) return ChangeResult.WindowGone;
+        try
+        {
+            if (_taskbar is null)
+            {
+                var taskbar = (ITaskbarList2)new TaskbarList();
+                taskbar.HrInit();
+                _taskbar = taskbar;
+            }
+            _taskbar.MarkFullscreenWindow(window.Value, fullscreen);
+            return ChangeResult.Ok;
+        }
+        catch (Exception e) when (e is COMException or InvalidCastException or UnauthorizedAccessException)
+        {
+            // No shell taskbar, or Explorer restarted since: create the taskbar list again next time.
+            _taskbar = null;
+            return IsWindow(window.Value) ? ChangeResult.Failed : ChangeResult.WindowGone;
+        }
+    }
+
+    public ChangeResult Activate(WindowHandle window)
+    {
+        if (!IsWindow(window.Value)) return ChangeResult.WindowGone;
+        if (SetForegroundWindow(window.Value)) return ChangeResult.Ok;
+        return IsWindow(window.Value) ? ChangeResult.Failed : ChangeResult.WindowGone;
+    }
+
     /// <summary>
     /// Take in the window destructions the OS has already reported, so lifetimes are current.
     /// Public for the native tests; <see cref="Describe"/> calls it first.
@@ -147,6 +246,44 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
     {
         foreach (var hook in _hooks) UnhookWinEvent(hook);
         _hooks.Clear();
+        foreach (var backdrop in _backdrops.ToList()) DestroyBackdrop(new BackdropHandle(backdrop));
+        if (_taskbar is not null) Marshal.ReleaseComObject(_taskbar);
+        _taskbar = null;
+    }
+
+    private static string RegisterBackdropClass()
+    {
+        var windowClass = new WNDCLASSEX
+        {
+            cbSize = Marshal.SizeOf<WNDCLASSEX>(),
+            lpfnWndProc = Marshal.GetFunctionPointerForDelegate(BackdropProc),
+            hInstance = GetModuleHandle(null),
+            hCursor = LoadCursor(0, IDC_ARROW),
+            hbrBackground = GetStockObject(BLACK_BRUSH),
+            lpszClassName = BackdropClass,
+        };
+        if (RegisterClassEx(ref windowClass) == 0 && Marshal.GetLastPInvokeError() != ERROR_CLASS_ALREADY_EXISTS)
+            throw new InvalidOperationException($"RegisterClassEx(backdrop) failed: {Marshal.GetLastPInvokeError()}.");
+        return BackdropClass;
+    }
+
+    private static nint OnBackdropMessage(nint hwnd, uint msg, nint wParam, nint lParam)
+    {
+        switch (msg)
+        {
+            case WM_MOUSEACTIVATE:
+                return MA_NOACTIVATE;
+            case WM_LBUTTONDOWN or WM_RBUTTONDOWN or WM_MBUTTONDOWN:
+                // Posted, like window events: the controller never runs inside this window procedure.
+                if (BackdropOwners.TryGetValue(hwnd, out var owner))
+                {
+                    var backdrop = new BackdropHandle(hwnd);
+                    owner._context.Post(_ => owner.BackdropClicked?.Invoke(backdrop), null);
+                }
+                return 0;
+            default:
+                return DefWindowProc(hwnd, msg, wParam, lParam);
+        }
     }
 
     private static bool TrySetRect(nint hwnd, WindowFrame frame, out int error)
@@ -230,6 +367,7 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
         switch (eventType)
         {
             case EVENT_OBJECT_SHOW: kind = WindowEventKind.Shown; break;
+            case EVENT_OBJECT_HIDE: kind = WindowEventKind.Hidden; break;
             case EVENT_OBJECT_DESTROY: kind = WindowEventKind.Destroyed; break;
             case EVENT_SYSTEM_FOREGROUND: kind = WindowEventKind.Foreground; break;
             case EVENT_OBJECT_LOCATIONCHANGE: kind = WindowEventKind.LocationChanged; break;

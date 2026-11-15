@@ -5,22 +5,27 @@ using System.Text;
 using GameBackdrop.Core.Geometry;
 using GameBackdrop.Core.Layout;
 using GameBackdrop.Core.WindowSystem;
+using Xunit.Abstractions;
 
 namespace GameBackdrop.Windows.Tests;
 
 /// <summary>
 /// The Win32 port against real windows: each test starts its own <c>TestWindow.exe</c> (another
 /// process, because the port skips its own process's window events) and kills it afterwards.
+/// A test that can't set up what it checks here (the foreground, a shell taskbar) passes without
+/// checking and says so in its output (<c>dotnet test --logger "console;verbosity=detailed"</c>).
 /// </summary>
 public sealed class Win32WindowSystemTests : IDisposable
 {
+    private readonly ITestOutputHelper _output;
     private readonly Process _testWindow;
     private readonly nint _hwnd;
     private readonly Win32WindowSystem _windows;
     private readonly List<WindowEvent> _events = [];
 
-    public Win32WindowSystemTests()
+    public Win32WindowSystemTests(ITestOutputHelper output)
     {
+        _output = output;
         // The port posts its events to the current SynchronizationContext; this one runs them at
         // once, on this thread, which also owns the hooks.
         SynchronizationContext.SetSynchronizationContext(new RunAtOnce());
@@ -113,6 +118,323 @@ public sealed class Win32WindowSystemTests : IDisposable
         Assert.True(PeekMessage(out _, 0, WM_APP_PROBE, WM_APP_PROBE, PM_REMOVE), "the posted message is still queued");
     }
 
+    [Fact]
+    public void A_backdrop_covers_the_bounds_it_is_given_directly_behind_the_window()
+    {
+        var bounds = _windows.Describe(new WindowHandle(_hwnd))!.Monitor.Bounds;
+        var backdrop = _windows.CreateBackdrop();
+
+        _windows.ShowBackdrop(backdrop, bounds, new WindowHandle(_hwnd));
+
+        var hwnd = backdrop.Value;
+        Assert.True(GetWindowRect(hwnd, out var rect));
+        Assert.Equal(bounds, new Rect(rect.Left, rect.Top, rect.Right, rect.Bottom));
+        Assert.True(IsWindowVisible(hwnd));
+        Assert.Equal(hwnd, NextVisibleBelow(_hwnd));
+        var exStyle = (uint)GetWindowLongPtr(hwnd, GWL_EXSTYLE);
+        Assert.True((exStyle & WS_EX_NOACTIVATE) != 0, "not activated by clicks");
+        Assert.True((exStyle & WS_EX_TOOLWINDOW) != 0, "not in alt-tab or the taskbar");
+        Assert.True((exStyle & WS_EX_TOPMOST) == 0, "never topmost");
+    }
+
+    [Fact]
+    public void A_backdrop_shown_behind_the_foreground_window_raises_that_window_to_the_top_first()
+    {
+        // Windows makes a window the foreground (and raises EVENT_SYSTEM_FOREGROUND) a moment
+        // before the window's own thread raises it: a backdrop ordered behind it in that gap would
+        // be left under whatever the window is about to jump over. This sets up that moment: the
+        // test window is the foreground, and another window sits above it. (Windows won't raise
+        // another window above the foreground one, so the foreground window is ordered behind it.)
+        using var otherProcess = StartTestWindow("--size 640x480");
+        var other = WaitFor(() => TestWindowOf(otherProcess.Id), "the other test window to open");
+        try
+        {
+            // A test process in the background may not take the foreground: then there is nothing to check.
+            if (!TryMakeForeground(_hwnd)) { NotChecked("the test window could not take the foreground"); return; }
+            SetWindowPos(_hwnd, other, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            if (GetForegroundWindow() != _hwnd || ZIndex(other) > ZIndex(_hwnd)) { NotChecked("the foreground or the order changed under the test"); return; }
+            var bounds = _windows.Describe(new WindowHandle(_hwnd))!.Monitor.Bounds;
+            var backdrop = _windows.CreateBackdrop();
+
+            _windows.ShowBackdrop(backdrop, bounds, new WindowHandle(_hwnd));
+
+            Assert.True(ZIndex(_hwnd) < ZIndex(other), "the foreground window is above the other window");
+            Assert.Equal(backdrop.Value, NextVisibleBelow(_hwnd));
+            Assert.Equal(_hwnd, GetForegroundWindow());
+        }
+        finally
+        {
+            otherProcess.Kill();
+        }
+    }
+
+    [Fact]
+    public void A_backdrop_shown_behind_a_window_that_is_not_the_foreground_does_not_raise_it()
+    {
+        // A third window is the foreground (Windows never raises a window above that one, so a
+        // raise would only show against a window that isn't), and the other window sits above
+        // the test window. Measured on Windows 11: from a process without the foreground, an
+        // HWND_TOP on a window that isn't the foreground is ignored anyway, so this pins the
+        // outcome (nothing raised) rather than the port's own check.
+        using var otherProcess = StartTestWindow("--size 640x480");
+        using var foregroundProcess = StartTestWindow("--size 320x240");
+        var other = WaitFor(() => TestWindowOf(otherProcess.Id), "the other test window to open");
+        var foreground = WaitFor(() => TestWindowOf(foregroundProcess.Id), "the foreground test window to open");
+        try
+        {
+            if (!TryMakeForeground(foreground)) { NotChecked("the third window could not take the foreground"); return; }
+            SetWindowPos(_hwnd, other, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            if (GetForegroundWindow() != foreground || ZIndex(other) > ZIndex(_hwnd)) { NotChecked("the foreground or the order changed under the test"); return; }
+            var bounds = _windows.Describe(new WindowHandle(_hwnd))!.Monitor.Bounds;
+            var backdrop = _windows.CreateBackdrop();
+
+            _windows.ShowBackdrop(backdrop, bounds, new WindowHandle(_hwnd));
+
+            Assert.True(ZIndex(other) < ZIndex(_hwnd), "the other window stays above the test window");
+            Assert.Equal(backdrop.Value, NextVisibleBelow(_hwnd));
+        }
+        finally
+        {
+            otherProcess.Kill();
+            foregroundProcess.Kill();
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_backdrop_shown_behind_a_topmost_window_stays_out_of_the_topmost_band(bool targetIsForeground)
+    {
+        // A windowed game can be topmost (Borderless keeps the bit). Ordered directly behind it,
+        // the backdrop would sit above any topmost window below the game, and Windows makes a
+        // window ordered there topmost too. Here two test windows are topmost, the target above
+        // the other. The backdrop is 16x16, at the target's corner, to keep this unobtrusive.
+        // The foreground goes to the target, or else to the other topmost window (where Windows
+        // would honour a raise of the backdrop over the ordinary windows). It is taken the way the
+        // other foreground tests take it (TryMakeForeground); when Windows still refuses there is
+        // nothing to check.
+        using var firstProcess = StartTestWindow("--size 320x240");
+        var first = WaitFor(() => TestWindowOf(firstProcess.Id), "the first topmost window to open");
+        using var lastProcess = StartTestWindow("--size 320x240");
+        var last = WaitFor(() => TestWindowOf(lastProcess.Id), "the last topmost window to open");
+        var (target, anchor) = targetIsForeground ? (last, first) : (first, last);
+        try
+        {
+            Assert.True(SetWindowPos(anchor, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE));
+            Assert.True(SetWindowPos(target, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE));
+            Assert.True(IsTopmost(target) && IsTopmost(anchor), "both test windows are topmost");
+            Assert.True(ZIndex(target) < ZIndex(anchor), "the target is above the other topmost window");
+            TryMakeForeground(targetIsForeground ? target : anchor);
+            Thread.Sleep(200);
+            if ((GetForegroundWindow() == target) != targetIsForeground)
+            {
+                NotChecked(targetIsForeground ? "the target did not get the foreground" : "the target got the foreground");
+                return;
+            }
+            Assert.True(GetWindowRect(target, out var corner));
+            var bounds = new Rect(corner.Left, corner.Top, corner.Left + 16, corner.Top + 16);
+            var backdrop = _windows.CreateBackdrop();
+            // First directly behind an ordinary window, so the test sees whether it is raised.
+            _windows.ShowBackdrop(backdrop, bounds, new WindowHandle(_hwnd));
+            Assert.True(ZIndex(backdrop.Value) > ZIndex(_hwnd));
+
+            _windows.ShowBackdrop(backdrop, bounds, new WindowHandle(target));
+
+            var exStyle = (uint)GetWindowLongPtr(backdrop.Value, GWL_EXSTYLE);
+            Assert.True((exStyle & WS_EX_TOPMOST) == 0, $"never topmost (ex-style 0x{exStyle:X8})");
+            Assert.True(IsWindowVisible(backdrop.Value));
+            Assert.True(ZIndex(backdrop.Value) > ZIndex(anchor), "below both topmost windows");
+            if (targetIsForeground)
+                Assert.True(ZIndex(backdrop.Value) < ZIndex(_hwnd), "the game in front: raised over the ordinary windows");
+            else
+                Assert.True(ZIndex(backdrop.Value) > ZIndex(_hwnd), "the game not in front: not raised over the ordinary windows");
+        }
+        finally
+        {
+            SetWindowPos(target, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            SetWindowPos(anchor, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            firstProcess.Kill();
+            lastProcess.Kill();
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_new_backdrop_behind_a_topmost_window_in_the_background_stays_below_the_active_app(bool appHoldsTheForeground)
+    {
+        // The game is topmost, but the user is in an ordinary app: the tray app started, or the
+        // game was shown, while they were elsewhere. A fresh backdrop has no safe place to keep.
+        // Where Windows creates it depends on who holds the foreground (measured on Windows 11):
+        // made by a process in the background, a new window goes directly below the foreground
+        // window; made while the app's own process holds the foreground (as just after it is
+        // launched), it goes to the top of the ordinary windows, above the active app. The first
+        // case is the ordinary test window as the active app; the second, a small window of this
+        // process, with the ordinary test window also open. The backdrop is 16x16, at the topmost
+        // target's corner, to keep this unobtrusive.
+        using var targetProcess = StartTestWindow("--size 320x240");
+        var target = WaitFor(() => TestWindowOf(targetProcess.Id), "the topmost window to open");
+        nint ownWindow = 0;
+        try
+        {
+            Assert.True(SetWindowPos(target, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE));
+            if (appHoldsTheForeground)
+            {
+                ownWindow = CreateWindowEx(0, "STATIC", "Game Backdrop test", WS_POPUP | WS_VISIBLE, 0, 0, 16, 16, 0, 0, 0, 0);
+                Assert.NotEqual(0, ownWindow);
+            }
+            var active = appHoldsTheForeground ? ownWindow : _hwnd;
+            if (!TryMakeForeground(active)) { NotChecked("the active window could not take the foreground"); return; }
+            if (!IsTopmost(target) || GetForegroundWindow() != active) { NotChecked("the foreground or the target changed under the test"); return; }
+            Assert.True(GetWindowRect(target, out var corner));
+            var bounds = new Rect(corner.Left, corner.Top, corner.Left + 16, corner.Top + 16);
+            var backdrop = _windows.CreateBackdrop();
+            string Order() => $"target Z {ZIndex(target)}, backdrop Z {ZIndex(backdrop.Value)}, active app Z {ZIndex(active)}, ordinary window Z {ZIndex(_hwnd)}";
+            _output.WriteLine($"created: {Order()}");
+
+            _windows.ShowBackdrop(backdrop, bounds, new WindowHandle(target));
+
+            _output.WriteLine($"shown: {Order()}");
+            var exStyle = (uint)GetWindowLongPtr(backdrop.Value, GWL_EXSTYLE);
+            Assert.True((exStyle & WS_EX_TOPMOST) == 0, $"never topmost (ex-style 0x{exStyle:X8})");
+            Assert.True(IsWindowVisible(backdrop.Value));
+            Assert.True(ZIndex(backdrop.Value) > ZIndex(active), $"below the active app ({Order()})");
+            Assert.True(ZIndex(backdrop.Value) > ZIndex(_hwnd), $"below the ordinary window ({Order()})");
+            Assert.Equal(active, GetForegroundWindow());
+        }
+        finally
+        {
+            SetWindowPos(target, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            targetProcess.Kill();
+            if (ownWindow != 0) DestroyWindow(ownWindow);
+        }
+    }
+
+    private static bool IsTopmost(nint hwnd) => ((uint)GetWindowLongPtr(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
+
+    [Fact]
+    public void Showing_a_backdrop_does_not_take_the_foreground()
+    {
+        var bounds = _windows.Describe(new WindowHandle(_hwnd))!.Monitor.Bounds;
+        var before = GetForegroundWindow();
+
+        _windows.ShowBackdrop(_windows.CreateBackdrop(), bounds, new WindowHandle(_hwnd));
+
+        Assert.Equal(before, GetForegroundWindow());
+    }
+
+    [Fact]
+    public void A_hidden_backdrop_is_not_visible_and_a_destroyed_one_is_gone()
+    {
+        var bounds = _windows.Describe(new WindowHandle(_hwnd))!.Monitor.Bounds;
+        var backdrop = _windows.CreateBackdrop();
+        Assert.False(IsWindowVisible(backdrop.Value), "created hidden");
+        _windows.ShowBackdrop(backdrop, bounds, new WindowHandle(_hwnd));
+
+        _windows.HideBackdrop(backdrop);
+        Assert.True(IsWindow(backdrop.Value));
+        Assert.False(IsWindowVisible(backdrop.Value));
+
+        _windows.DestroyBackdrop(backdrop);
+        Assert.False(IsWindow(backdrop.Value));
+        _windows.DestroyBackdrop(backdrop); // already gone: no-op
+    }
+
+    [Theory]
+    [InlineData(WM_LBUTTONDOWN)]
+    [InlineData(WM_RBUTTONDOWN)]
+    [InlineData(WM_MBUTTONDOWN)]
+    public void A_click_on_a_backdrop_raises_BackdropClicked_and_does_not_activate_it(uint button)
+    {
+        var bounds = _windows.Describe(new WindowHandle(_hwnd))!.Monitor.Bounds;
+        var backdrop = _windows.CreateBackdrop();
+        _windows.ShowBackdrop(backdrop, bounds, new WindowHandle(_hwnd));
+        var clicks = new List<BackdropHandle>();
+        _windows.BackdropClicked += clicks.Add;
+
+        Assert.Equal(MA_NOACTIVATE, SendMessage(backdrop.Value, WM_MOUSEACTIVATE, backdrop.Value, (nint)(HTCLIENT | (button << 16))));
+        Assert.True(PostMessage(backdrop.Value, button, 0, 0));
+        while (PeekMessage(out var msg, backdrop.Value, 0, 0, PM_REMOVE)) DispatchMessage(ref msg);
+
+        Assert.Equal([backdrop], clicks);
+    }
+
+    [Fact]
+    public void Hiding_a_window_raises_Hidden_with_its_lifetime()
+    {
+        var handle = new WindowHandle(_hwnd);
+        var lifetime = _windows.Describe(handle)!.Lifetime;
+
+        ShowWindow(_hwnd, SW_HIDE);
+        WaitFor(() => IsWindowVisible(_hwnd) ? 0 : 1, "the window to hide");
+
+        WaitFor(() =>
+        {
+            _windows.Describe(handle); // takes in the queued window events
+            return _events.Contains(new WindowEvent(WindowEventKind.Hidden, handle, lifetime)) ? 1 : 0;
+        }, "the Hidden event");
+    }
+
+    [Fact]
+    public void Marking_a_window_fullscreen_and_back_succeeds()
+    {
+        // xUnit 2 has no runtime skip: with no shell taskbar (a CI runner without Explorer) there
+        // is nothing to tell, so the test passes without checking.
+        if (FindWindow("Shell_TrayWnd", null) == 0) { NotChecked("no shell taskbar"); return; }
+        var handle = new WindowHandle(_hwnd);
+
+        Assert.Equal(ChangeResult.Ok, _windows.MarkFullscreen(handle, true));
+        Assert.Equal(ChangeResult.Ok, _windows.MarkFullscreen(handle, false));
+    }
+
+    [Fact]
+    public void Marking_or_activating_a_window_that_is_gone_says_so()
+    {
+        var handle = new WindowHandle(_hwnd);
+        _testWindow.Kill();
+        _testWindow.WaitForExit();
+        WaitFor(() => IsWindow(_hwnd) ? 0 : 1, "the window to be destroyed");
+
+        Assert.Equal(ChangeResult.WindowGone, _windows.MarkFullscreen(handle, true));
+        Assert.Equal(ChangeResult.WindowGone, _windows.Activate(handle));
+    }
+
+    /// <summary>The test passes without checking: say why, so a run shows which tests checked nothing.</summary>
+    private void NotChecked(string why) => _output.WriteLine($"NOT CHECKED: {why}.");
+
+    /// <summary>
+    /// Make <paramref name="hwnd"/> the foreground window. A process in the background may not
+    /// take the foreground; a tap of ALT (down and up, no other key) lets it.
+    /// </summary>
+    private static bool TryMakeForeground(nint hwnd)
+    {
+        for (var attempt = 0; attempt < 5 && GetForegroundWindow() != hwnd; attempt++)
+        {
+            keybd_event(VK_MENU, 0, 0, 0);
+            SetForegroundWindow(hwnd);
+            keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);
+            Thread.Sleep(200);
+        }
+        return GetForegroundWindow() == hwnd;
+    }
+
+    /// <summary>The window's position in the desktop's Z order, front first.</summary>
+    private static int ZIndex(nint hwnd)
+    {
+        var index = 0;
+        for (var next = GetTopWindow(0); next != 0; next = GetWindow(next, GW_HWNDNEXT), index++)
+            if (next == hwnd) return index;
+        return int.MaxValue;
+    }
+
+    /// <summary>The first visible window below <paramref name="hwnd"/> in the Z order.</summary>
+    private static nint NextVisibleBelow(nint hwnd)
+    {
+        for (var next = GetWindow(hwnd, GW_HWNDNEXT); next != 0; next = GetWindow(next, GW_HWNDNEXT))
+            if (IsWindowVisible(next)) return next;
+        return 0;
+    }
+
     private static Process StartTestWindow(string arguments)
     {
         var exe = typeof(Win32WindowSystemTests).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
@@ -151,7 +473,35 @@ public sealed class Win32WindowSystemTests : IDisposable
         public override void Post(SendOrPostCallback d, object? state) => d(state);
     }
 
-    private const int SW_MINIMIZE = 6, SW_RESTORE = 9;
+    private const int SW_HIDE = 0, SW_MINIMIZE = 6, SW_RESTORE = 9;
+    private const int GWL_EXSTYLE = -20;
+    private const uint GW_HWNDNEXT = 2;
+    private const uint WS_EX_TOPMOST = 0x8, WS_EX_TOOLWINDOW = 0x80, WS_EX_NOACTIVATE = 0x08000000;
+    private const uint WM_MOUSEACTIVATE = 0x0021, WM_LBUTTONDOWN = 0x0201, WM_RBUTTONDOWN = 0x0204, WM_MBUTTONDOWN = 0x0207;
+    private const uint HTCLIENT = 1;
+    private const nint MA_NOACTIVATE = 3;
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RECT { public int Left, Top, Right, Bottom; }
+    [DllImport("user32.dll")] private static extern bool GetWindowRect(nint hwnd, out RECT rect);
+    [DllImport("user32.dll")] private static extern nint GetWindow(nint hwnd, uint command);
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern nint GetWindowLongPtr(nint hwnd, int index);
+    [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern bool SetForegroundWindow(nint hwnd);
+    [DllImport("user32.dll")] private static extern nint GetTopWindow(nint hwnd);
+    [DllImport("user32.dll")] private static extern bool SetWindowPos(nint hwnd, nint insertAfter, int x, int y, int cx, int cy, uint flags);
+    [DllImport("user32.dll")] private static extern void keybd_event(byte vk, byte scan, uint flags, nint extraInfo);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "CreateWindowExW")]
+    private static extern nint CreateWindowEx(uint exStyle, string className, string? windowName, uint style, int x, int y, int width, int height, nint parent, nint menu, nint instance, nint param);
+    [DllImport("user32.dll")] private static extern bool DestroyWindow(nint hwnd);
+    private const uint WS_POPUP = 0x80000000, WS_VISIBLE = 0x10000000;
+    private const nint HWND_TOP = 0, HWND_TOPMOST = -1, HWND_NOTOPMOST = -2;
+    private const uint SWP_NOSIZE = 0x1, SWP_NOMOVE = 0x2, SWP_NOACTIVATE = 0x10;
+    private const byte VK_MENU = 0x12;
+    private const uint KEYEVENTF_KEYUP = 0x2;
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint FindWindow(string className, string? windowName);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint SendMessage(nint hwnd, uint msg, nint wParam, nint lParam);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern bool PostMessage(nint hwnd, uint msg, nint wParam, nint lParam);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint DispatchMessage(ref MSG msg);
     private const uint WM_APP_PROBE = 0x8000 + 1, PM_REMOVE = 1;
     [StructLayout(LayoutKind.Sequential)]
     private struct MSG { public nint hwnd; public uint message; public nint wParam, lParam; public uint time; public int x, y; public uint priv; }
