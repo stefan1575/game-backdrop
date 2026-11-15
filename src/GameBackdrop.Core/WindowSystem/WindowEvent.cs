@@ -23,4 +23,6 @@ public enum ChangeResult
     WindowGone,
     /// <summary>The change failed for another reason; the window was left as it was.</summary>
     Failed,
+    /// <summary>The change failed part-way and couldn't be undone: the window may be half-changed.</summary>
+    PartlyChanged,
 }

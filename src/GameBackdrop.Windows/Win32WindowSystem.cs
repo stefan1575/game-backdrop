@@ -83,17 +83,23 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
         var previousStyle = (uint)GetWindowLongPtr(hwnd, GWL_STYLE);
         var previousExStyle = (uint)GetWindowLongPtr(hwnd, GWL_EXSTYLE);
 
-        if (TrySetLong(hwnd, GWL_STYLE, frame.Style.Style, out var error)
-            && TrySetLong(hwnd, GWL_EXSTYLE, frame.Style.ExStyle, out error)
-            && TrySetPos(hwnd, frame.Outer, out error))
+        if (!TrySetLong(hwnd, GWL_STYLE, frame.Style.Style, out var error))
+        {
+            // Nothing has changed yet.
+            if (!IsWindow(hwnd)) return ChangeResult.WindowGone;
+            return error == ERROR_ACCESS_DENIED ? ChangeResult.AccessDenied : ChangeResult.Failed;
+        }
+        if (TrySetLong(hwnd, GWL_EXSTYLE, frame.Style.ExStyle, out error) && TrySetPos(hwnd, frame.Outer, out error))
         {
             return ChangeResult.Ok;
         }
 
         if (!IsWindow(hwnd)) return ChangeResult.WindowGone;
-        // Don't leave a half-changed window behind: put back whatever styles did change.
-        TrySetLong(hwnd, GWL_STYLE, previousStyle, out _);
-        TrySetLong(hwnd, GWL_EXSTYLE, previousExStyle, out _);
+        // Don't leave a half-changed window behind: put back the styles, and say so if that fails too.
+        var rolledBack = TrySetLong(hwnd, GWL_STYLE, previousStyle, out _)
+            & TrySetLong(hwnd, GWL_EXSTYLE, previousExStyle, out _)
+            & SetWindowPos(hwnd, 0, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+        if (!rolledBack) return ChangeResult.PartlyChanged;
         return error == ERROR_ACCESS_DENIED ? ChangeResult.AccessDenied : ChangeResult.Failed;
     }
 

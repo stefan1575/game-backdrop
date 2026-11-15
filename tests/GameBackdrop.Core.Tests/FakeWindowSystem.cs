@@ -81,9 +81,21 @@ public sealed class FakeWindowSystem : IWindowSystem
         var w = Find(handle);
         if (w is null) return ChangeResult.WindowGone;
         if (w.Process.Elevated) return ChangeResult.AccessDenied;
+        if (w.ScriptedResults.TryDequeue(out var scripted))
+        {
+            // A failure leaves the window as it was; a partial change applies the styles only.
+            if (scripted == ChangeResult.PartlyChanged) w.Style = frame.Style;
+            return scripted;
+        }
         w.Style = frame.Style;
         w.Outer = frame.Outer;
         return ChangeResult.Ok;
+    }
+
+    /// <summary>The next SetFrame calls on <paramref name="window"/> return these results instead of succeeding.</summary>
+    public void FailNextChanges(FakeWindow window, params ChangeResult[] results)
+    {
+        foreach (var result in results) window.ScriptedResults.Enqueue(result);
     }
 
     private FakeWindow? Find(WindowHandle handle) => _windows.FirstOrDefault(w => w.Handle == handle);
@@ -112,6 +124,7 @@ public sealed class FakeWindow(WindowHandle handle, FakeProcess process, WindowS
     public bool IsMinimized { get; set; }
     public bool IsGone { get; set; }
     public WindowHandle? Owner { get; init; }
+    public Queue<ChangeResult> ScriptedResults { get; } = new();
 
     public bool HasBorder => (Style.Style & (WindowStyle.WS_CAPTION | WindowStyle.WS_THICKFRAME)) != 0;
 

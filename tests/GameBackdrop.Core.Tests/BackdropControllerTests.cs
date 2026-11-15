@@ -275,6 +275,85 @@ public sealed class BackdropControllerTests
     }
 
     [Fact]
+    public void A_restore_that_fails_keeps_the_original_and_a_later_restore_puts_the_game_back()
+    {
+        var controller = StartController();
+        var game = _desktop.OpenWindowed(_desktop.StartProcess(Dota), new Size(800, 600), left: 50, top: 60);
+        _desktop.FailNextChanges(game, ChangeResult.Failed);
+
+        var notRestored = controller.RestoreAll();
+
+        Assert.Single(notRestored);
+        Assert.False(game.HasBorder);
+
+        Assert.Empty(controller.RestoreAll());
+        AssertUntouched(game, new WindowFrame(FakeWindowSystem.Captioned, Rect.FromPosition(50, 60, new Size(816, 639))));
+    }
+
+    [Fact]
+    public void Quitting_reports_a_game_it_could_not_put_back_and_quitting_again_retries_it()
+    {
+        var controller = StartController();
+        var dota = _desktop.OpenWindowed(_desktop.StartProcess(Dota), new Size(800, 600), left: 50, top: 60);
+        var novel = _desktop.OpenWindowed(_desktop.StartProcess(Novel), new Size(800, 600), left: 70, top: 80);
+        _desktop.FailNextChanges(dota, ChangeResult.Failed);
+
+        var notRestored = controller.Stop();
+
+        Assert.Equal(dota.Handle, Assert.Single(notRestored).Window);
+        AssertUntouched(novel, new WindowFrame(FakeWindowSystem.Captioned, Rect.FromPosition(70, 80, new Size(816, 639))));
+
+        Assert.Empty(controller.Stop());
+        AssertUntouched(dota, new WindowFrame(FakeWindowSystem.Captioned, Rect.FromPosition(50, 60, new Size(816, 639))));
+    }
+
+    [Fact]
+    public void A_half_failed_restore_is_retried()
+    {
+        var controller = StartController();
+        var game = _desktop.OpenWindowed(_desktop.StartProcess(Dota), new Size(800, 600), left: 50, top: 60);
+        _desktop.FailNextChanges(game, ChangeResult.PartlyChanged);
+
+        Assert.Single(controller.Stop());
+        Assert.Empty(controller.Stop());
+
+        AssertUntouched(game, new WindowFrame(FakeWindowSystem.Captioned, Rect.FromPosition(50, 60, new Size(816, 639))));
+    }
+
+    [Fact]
+    public void A_splash_screen_that_could_not_be_put_back_is_retried_on_quit()
+    {
+        var controller = StartController();
+        var process = _desktop.StartProcess(Novel);
+        var splashRect = new Rect(100, 100, 500, 400);
+        var splash = _desktop.Open(process, FakeWindowSystem.Captioned, splashRect);
+        _desktop.FailNextChanges(splash, ChangeResult.Failed);
+
+        var game = _desktop.OpenWindowed(process, new Size(1280, 720));
+
+        Assert.False(game.HasBorder);
+        Assert.False(splash.HasBorder);
+        Assert.Empty(controller.Stop());
+        AssertUntouched(splash, new WindowFrame(FakeWindowSystem.Captioned, splashRect));
+        Assert.True(game.HasBorder);
+    }
+
+    [Fact]
+    public void A_restyle_that_half_fails_is_still_put_back_on_quit()
+    {
+        var controller = StartController();
+        var process = _desktop.StartProcess(Dota);
+        var game = _desktop.OpenWindowed(process, new Size(800, 600), left: 50, top: 60, show: false);
+        _desktop.FailNextChanges(game, ChangeResult.PartlyChanged);
+        _desktop.Show(game);
+        Assert.False(game.HasBorder); // the styles changed, the rect didn't
+
+        Assert.Empty(controller.Stop());
+
+        AssertUntouched(game, new WindowFrame(FakeWindowSystem.Captioned, Rect.FromPosition(50, 60, new Size(816, 639))));
+    }
+
+    [Fact]
     public void Quitting_leaves_a_fullscreen_game_alone()
     {
         var controller = StartController();

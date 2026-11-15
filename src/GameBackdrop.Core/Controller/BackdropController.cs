@@ -11,10 +11,18 @@ public enum TrackedState
 {
     /// <summary>The window fills its monitor: the game's own mode wins and nothing was changed.</summary>
     Fullscreen,
-    /// <summary>The window was made borderless and centred; <see cref="TrackedWindow.Original"/> puts it back.</summary>
+    /// <summary>
+    /// The window was made borderless and centred (or half-changed by a failed attempt);
+    /// <see cref="TrackedWindow.Original"/> puts it back.
+    /// </summary>
     Restyled,
     /// <summary>The port refused the change (an elevated game): nothing was changed, and it isn't retried.</summary>
     AccessDenied,
+    /// <summary>
+    /// A replaced splash window that couldn't be put back yet. It is no longer the game's window,
+    /// but its original is kept so <see cref="BackdropController.RestoreAll"/> tries again.
+    /// </summary>
+    RestorePending,
 }
 
 /// <summary>A game window the controller is tracking: one per game process.</summary>
@@ -49,19 +57,34 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
         foreach (var window in windows.TopLevelWindows()) Consider(window);
     }
 
-    /// <summary>Stop watching and put every changed game window back as it was.</summary>
-    public void Stop()
+    /// <summary>
+    /// Stop watching and put every changed game window back as it was. Returns the windows that
+    /// couldn't be put back; they keep their originals, and calling Stop again retries them.
+    /// </summary>
+    public IReadOnlyList<TrackedWindow> Stop()
     {
-        if (!_running) return;
-        _running = false;
-        windows.WindowEvent -= OnWindowEvent;
-        RestoreAll();
+        if (_running)
+        {
+            _running = false;
+            windows.WindowEvent -= OnWindowEvent;
+        }
+        return RestoreAll();
     }
 
-    /// <summary>Put every changed game window back. Safe to call more than once, and from a crash handler.</summary>
-    public void RestoreAll()
+    /// <summary>
+    /// Put every changed game window back. Returns the windows that couldn't be put back: they
+    /// stay tracked with their originals, so a later call tries again. Safe to call more than once,
+    /// and from a crash handler.
+    /// </summary>
+    public IReadOnlyList<TrackedWindow> RestoreAll()
     {
-        foreach (var tracked in _tracked.Values.ToList()) Release(tracked);
+        var notRestored = new List<TrackedWindow>();
+        foreach (var tracked in _tracked.Values.ToList())
+        {
+            if (TryRestore(tracked)) _tracked.Remove(tracked.Window);
+            else notRestored.Add(tracked);
+        }
+        return notRestored;
     }
 
     private void OnWindowEvent(WindowEvent e)
@@ -86,11 +109,12 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
         var game = games.FindEnabled(info.ProcessPath);
         if (game is null) return;
 
-        var current = _tracked.Values.FirstOrDefault(t => t.ProcessId == info.ProcessId);
+        var current = _tracked.Values.FirstOrDefault(t => t.ProcessId == info.ProcessId && t.State != TrackedState.RestorePending);
         if (current is not null)
         {
             if (!Replaces(info, current)) return;
-            Release(current);
+            if (TryRestore(current)) _tracked.Remove(current.Window);
+            else _tracked[current.Window] = current with { State = TrackedState.RestorePending };
         }
 
         Track(info, game);
@@ -117,6 +141,8 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
             switch (windows.SetFrame(info.Handle, target))
             {
                 case ChangeResult.Ok:
+                case ChangeResult.PartlyChanged:
+                    // A half-changed window still has to be put back.
                     state = TrackedState.Restyled;
                     break;
                 case ChangeResult.AccessDenied:
@@ -132,9 +158,10 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
         _tracked[info.Handle] = new TrackedWindow(info.Handle, info.ProcessId, game, state, info.Frame, info.Style.HasCaption, info.Client.Size);
     }
 
-    private void Release(TrackedWindow tracked)
+    /// <summary>Put a tracked window back as it was. False when that failed and should be tried again.</summary>
+    private bool TryRestore(TrackedWindow tracked)
     {
-        _tracked.Remove(tracked.Window);
-        if (tracked.State == TrackedState.Restyled) windows.SetFrame(tracked.Window, tracked.Original);
+        if (tracked.State is not (TrackedState.Restyled or TrackedState.RestorePending)) return true;
+        return windows.SetFrame(tracked.Window, tracked.Original) is ChangeResult.Ok or ChangeResult.WindowGone;
     }
 }

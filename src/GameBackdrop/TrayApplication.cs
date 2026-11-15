@@ -14,7 +14,7 @@ internal sealed class TrayApplication : ApplicationContext
     private readonly NotifyIcon _icon;
     private readonly Win32WindowSystem _windows;
     private readonly BackdropController _controller;
-    private bool _stopped;
+    private bool _failureReported;
 
     public TrayApplication(SettingsStore settings)
     {
@@ -68,11 +68,25 @@ internal sealed class TrayApplication : ApplicationContext
         base.Dispose(disposing);
     }
 
+    /// <summary>
+    /// Stop the controller and put every game back. A restore that fails is retried a few times;
+    /// any game still not put back is named to Stefan once, rather than forgotten silently.
+    /// </summary>
     private void StopController()
     {
-        if (_stopped) return;
-        _stopped = true;
-        _controller.Stop();
+        var notRestored = _controller.Stop();
+        if (_failureReported) return;
+        for (var attempt = 0; attempt < 3 && notRestored.Count > 0; attempt++)
+        {
+            Thread.Sleep(200);
+            notRestored = _controller.Stop();
+        }
+        if (notRestored.Count == 0) return;
+
+        _failureReported = true;
+        var names = string.Join("\n", notRestored.Select(t => t.Game.DisplayName ?? t.Game.ExePath));
+        MessageBox.Show($"Game Backdrop couldn't put these game windows back as they were:\n\n{names}",
+            "Game Backdrop", MessageBoxButtons.OK, MessageBoxIcon.Warning);
     }
 
     private void Crash(Exception? exception)
