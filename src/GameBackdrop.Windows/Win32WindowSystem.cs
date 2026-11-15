@@ -27,6 +27,12 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
     private readonly WinEventProc _callback; // kept alive for as long as the hooks are
     private readonly List<nint> _hooks = [];
 
+    // Each window's lifetime number, given the first time it is described and dropped when its
+    // destroy event reaches this thread (WindowInfo.Lifetime). Only touched on this thread: the
+    // hook callback runs here too.
+    private readonly Dictionary<nint, long> _lifetimes = [];
+    private long _nextLifetime = 1;
+
     public Win32WindowSystem()
     {
         _context = SynchronizationContext.Current
@@ -62,9 +68,11 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
         var monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
         var monitorInfo = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
         if (!GetMonitorInfo(monitor, ref monitorInfo)) return null;
+        if (!_lifetimes.TryGetValue(hwnd, out var lifetime)) _lifetimes[hwnd] = lifetime = _nextLifetime++;
 
         return new WindowInfo(
             window,
+            lifetime,
             (int)processId,
             ProcessPath(processId),
             ToRect(outer),
@@ -99,7 +107,7 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
             if (!IsWindow(hwnd)) return ChangeResult.WindowGone;
             return error == ERROR_ACCESS_DENIED ? ChangeResult.AccessDenied : ChangeResult.Failed;
         }
-        if (TrySetLong(hwnd, GWL_EXSTYLE, frame.Style.ExStyle, out error) && TrySetPos(hwnd, frame.Outer, out error))
+        if (TrySetLong(hwnd, GWL_EXSTYLE, frame.Style.ExStyle, out error) && TrySetRect(hwnd, frame, out error))
         {
             return ChangeResult.Ok;
         }
@@ -113,16 +121,64 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
         return error == ERROR_ACCESS_DENIED ? ChangeResult.AccessDenied : ChangeResult.Failed;
     }
 
+    public void CatchUp()
+    {
+        // Out-of-context WinEvents are queued to this thread and delivered while it checks its
+        // queue. Peeking without removing delivers the pending ones (OnWinEvent runs, dropping the
+        // lifetimes of destroyed windows) and leaves posted messages, including the events it
+        // posts, for the message loop.
+        PeekMessage(out _, 0, 0, 0, PM_NOREMOVE);
+    }
+
     public void Dispose()
     {
         foreach (var hook in _hooks) UnhookWinEvent(hook);
         _hooks.Clear();
     }
 
-    private static bool TrySetPos(nint hwnd, Rect outer, out int error)
+    private static bool TrySetRect(nint hwnd, WindowFrame frame, out int error)
     {
-        var ok = SetWindowPos(hwnd, 0, outer.Left, outer.Top, outer.Width, outer.Height,
-            SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+        bool ok;
+        if (IsIconic(hwnd))
+        {
+            // A minimised window's rect is its icon's. Its normal placement is where it reopens,
+            // so set that (keeping it minimised), then apply the new styles' frame.
+            ok = TrySetNormalPlacement(hwnd, frame, out error)
+                && SetWindowPos(hwnd, 0, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+        }
+        else
+        {
+            var outer = frame.Outer;
+            ok = SetWindowPos(hwnd, 0, outer.Left, outer.Top, outer.Width, outer.Height,
+                SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+        }
+        error = ok ? 0 : Marshal.GetLastPInvokeError();
+        return ok;
+    }
+
+    private static bool TrySetNormalPlacement(nint hwnd, WindowFrame frame, out int error)
+    {
+        var placement = new WINDOWPLACEMENT { length = Marshal.SizeOf<WINDOWPLACEMENT>() };
+        if (!GetWindowPlacement(hwnd, ref placement))
+        {
+            error = Marshal.GetLastPInvokeError();
+            return false;
+        }
+        // rcNormalPosition is in workspace coordinates (relative to the monitor's work area)
+        // unless the window is a tool window.
+        var normal = new RECT { Left = frame.Outer.Left, Top = frame.Outer.Top, Right = frame.Outer.Right, Bottom = frame.Outer.Bottom };
+        if ((frame.Style.ExStyle & WS_EX_TOOLWINDOW) == 0)
+        {
+            var monitor = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
+            if (GetMonitorInfo(MonitorFromRect(ref normal, MONITOR_DEFAULTTONEAREST), ref monitor))
+            {
+                int dx = monitor.rcWork.Left - monitor.rcMonitor.Left, dy = monitor.rcWork.Top - monitor.rcMonitor.Top;
+                normal = new RECT { Left = normal.Left - dx, Top = normal.Top - dy, Right = normal.Right - dx, Bottom = normal.Bottom - dy };
+            }
+        }
+        placement.rcNormalPosition = normal;
+        placement.showCmd = SW_SHOWMINNOACTIVE;
+        var ok = SetWindowPlacement(hwnd, ref placement);
         error = ok ? 0 : Marshal.GetLastPInvokeError();
         return ok;
     }
@@ -168,10 +224,20 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
             case EVENT_SYSTEM_MINIMIZEEND: kind = WindowEventKind.MinimizeEnd; break;
             default: return;
         }
-        // A destroyed window can't be asked for its ancestor; the controller ignores handles it doesn't track.
-        if (kind != WindowEventKind.Destroyed && GetAncestor(hwnd, GA_ROOT) != hwnd) return;
+        long lifetime;
+        if (kind == WindowEventKind.Destroyed)
+        {
+            // A destroyed window can't be asked for its ancestor; the controller ignores handles it
+            // doesn't track. Its lifetime ends now, so a later window with this handle gets a new one.
+            _lifetimes.Remove(hwnd, out lifetime);
+        }
+        else
+        {
+            if (GetAncestor(hwnd, GA_ROOT) != hwnd) return;
+            lifetime = _lifetimes.GetValueOrDefault(hwnd);
+        }
 
-        var e = new WindowEvent(kind, new WindowHandle(hwnd));
+        var e = new WindowEvent(kind, new WindowHandle(hwnd), lifetime);
         _context.Post(_ => WindowEvent?.Invoke(e), null);
     }
 }

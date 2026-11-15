@@ -26,13 +26,11 @@ public enum TrackedState
 }
 
 /// <summary>A game window the controller is tracking: one per game process.</summary>
-/// <param name="ProcessId">With <paramref name="ProcessPath"/> and <paramref name="Style"/>, how
-/// the window is told apart from a later one: a window handle can be reused once its window is
-/// destroyed, even by a new window of the same game, so the controller checks all three before it
-/// changes the window behind a handle.</param>
-/// <param name="Style">The styles the window has while it is this tracked window: the ones the
-/// controller gave it, or its own when nothing was changed. A new top-level window always has a
-/// title bar or WS_POPUP of its own, so it doesn't have the borderless styles the controller set.</param>
+/// <param name="Lifetime">Which window behind <paramref name="Window"/> this is
+/// (<see cref="WindowInfo.Lifetime"/>): a handle can be reused once its window is destroyed, even
+/// by a new window of the same game, so the controller checks the lifetime before it changes the
+/// window behind a handle. A window that changes its own frame keeps its lifetime, and its
+/// original.</param>
 /// <param name="Original">The window's frame before the controller first touched it.</param>
 /// <param name="HadCaption">Whether the window had a title bar when it was first seen.</param>
 public sealed record TrackedWindow(
@@ -41,7 +39,7 @@ public sealed record TrackedWindow(
     string? ProcessPath,
     GameEntry Game,
     TrackedState State,
-    WindowStyle Style,
+    long Lifetime,
     WindowFrame Original,
     bool HadCaption,
     Size ClientSize);
@@ -63,6 +61,8 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
         if (_running) return;
         _running = true;
         windows.WindowEvent += OnWindowEvent;
+        // Destructions reported before now must not be taken for the windows found below.
+        windows.CatchUp();
         foreach (var window in windows.TopLevelWindows()) Consider(window);
     }
 
@@ -91,7 +91,7 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
         foreach (var tracked in _tracked.Values.ToList())
         {
             if (TryRestore(tracked)) _tracked.Remove(tracked.Window);
-            else notRestored.Add(_tracked[tracked.Window] = AfterFailedRestore(tracked));
+            else notRestored.Add(tracked);
         }
         return notRestored;
     }
@@ -105,9 +105,8 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
                 break;
             case WindowEventKind.Destroyed:
                 // A game that has exited needs no restore. Destroy events arrive queued, so the
-                // handle may already belong to a newer window: keep the record only if the window
-                // behind the handle is still the tracked one (a newer one tracked since, say).
-                if (_tracked.TryGetValue(e.Window, out var tracked) && !IsStillTheSameWindow(tracked, windows.Describe(e.Window)))
+                // handle may already belong to a newer window: forget only the window that ended.
+                if (_tracked.TryGetValue(e.Window, out var tracked) && tracked.Lifetime == e.Lifetime)
                     _tracked.Remove(e.Window);
                 break;
         }
@@ -119,7 +118,7 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
         if (info is null) return;
         if (_tracked.TryGetValue(handle, out var known))
         {
-            if (IsStillTheSameWindow(known, info)) return;
+            if (IsStillTheSameWindow(known.Lifetime, info)) return;
             // The tracked window is gone and another window has its handle: forget the old one.
             _tracked.Remove(handle);
         }
@@ -132,7 +131,7 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
         {
             if (!Replaces(info, current)) return;
             if (TryRestore(current)) _tracked.Remove(current.Window);
-            else _tracked[current.Window] = AfterFailedRestore(current) with { State = TrackedState.RestorePending };
+            else _tracked[current.Window] = current with { State = TrackedState.RestorePending };
         }
 
         Track(info, game);
@@ -153,7 +152,6 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
     private void Track(WindowInfo info, GameEntry game)
     {
         var state = TrackedState.Fullscreen;
-        var trackedStyle = info.Style;
         if (WindowClassifier.Classify(info.Client, info.Style.HasCaption, info.Monitor.Bounds) == WindowMode.Windowed)
         {
             // The client area keeps its size; whatever non-client part survives the restyle (a
@@ -168,10 +166,9 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
                     // A half-changed window still has to be put back.
                     state = TrackedState.Restyled;
                     var after = windows.Describe(info.Handle);
-                    if (result == ChangeResult.Ok && after is not null && after.Client.Size != info.Client.Size)
-                        after = CorrectClientSize(info, style, outerSize, after);
-                    // Whatever styles the window really has now are the ones that mark it as ours.
-                    trackedStyle = after?.Style ?? style;
+                    if (result == ChangeResult.Ok && after is not null && IsStillTheSameWindow(info.Lifetime, after)
+                        && after.Client.Size != info.Client.Size)
+                        CorrectClientSize(info, style, outerSize, after);
                     break;
                 case ChangeResult.AccessDenied:
                     state = TrackedState.AccessDenied;
@@ -183,49 +180,34 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
             }
         }
 
-        _tracked[info.Handle] = new TrackedWindow(info.Handle, info.ProcessId, info.ProcessPath, game, state, trackedStyle, info.Frame, info.Style.HasCaption, info.Client.Size);
+        _tracked[info.Handle] = new TrackedWindow(info.Handle, info.ProcessId, info.ProcessPath, game, state, info.Lifetime, info.Frame, info.Style.HasCaption, info.Client.Size);
     }
 
     /// <summary>
     /// The port's outer size can be short: a menu bar that wraps onto more than one row is taller
     /// than the port predicts. Grow the window by what the client area lost, measured, and centre
-    /// it again. Returns the window as it is afterwards.
+    /// it again. If that fails the window stays restyled and is still put back on quit.
     /// </summary>
-    private WindowInfo? CorrectClientSize(WindowInfo before, WindowStyle style, Size outerSize, WindowInfo after)
+    private void CorrectClientSize(WindowInfo before, WindowStyle style, Size outerSize, WindowInfo after)
     {
         var corrected = new Size(
             outerSize.Width + before.Client.Width - after.Client.Width,
             outerSize.Height + before.Client.Height - after.Client.Height);
         windows.SetFrame(before.Handle, new WindowFrame(style, Placement.Centre(corrected, before.Monitor.Bounds)));
-        return windows.Describe(before.Handle);
     }
 
     /// <summary>Put a tracked window back as it was. False when that failed and should be tried again.</summary>
     private bool TryRestore(TrackedWindow tracked)
     {
         if (tracked.State is not (TrackedState.Restyled or TrackedState.RestorePending)) return true;
-        // A window that has gone needs nothing back, and its handle may now be another program's window.
-        if (!IsStillTheSameWindow(tracked, windows.Describe(tracked.Window))) return true;
+        // A window that has gone needs nothing back, and its handle may now be another window
+        // (another program's, or a new one of the same game). Destructions the OS has reported
+        // but the port hasn't seen yet are taken in first, so the lifetime is current.
+        windows.CatchUp();
+        if (!IsStillTheSameWindow(tracked.Lifetime, windows.Describe(tracked.Window))) return true;
         return windows.SetFrame(tracked.Window, tracked.Original) is ChangeResult.Ok or ChangeResult.WindowGone;
     }
 
-    /// <summary>
-    /// A restore that failed part-way may have changed the window's styles: those are now the ones
-    /// that mark it as ours, so the retry still recognises it.
-    /// </summary>
-    private TrackedWindow AfterFailedRestore(TrackedWindow tracked) =>
-        windows.Describe(tracked.Window) is { } now && now.ProcessId == tracked.ProcessId
-            ? tracked with { Style = now.Style }
-            : tracked;
-
-    /// <summary>
-    /// Whether the window behind a tracked handle is still the one that was tracked: the same
-    /// process, and the frame styles it had when it was tracked (state bits such as minimised
-    /// don't count). A window whose frame styles changed since is either a new window with the
-    /// old handle or a game that restyled itself; neither gets the saved frame put back.
-    /// </summary>
-    private static bool IsStillTheSameWindow(TrackedWindow tracked, WindowInfo? now) =>
-        now is not null && now.ProcessId == tracked.ProcessId
-        && string.Equals(now.ProcessPath, tracked.ProcessPath, StringComparison.OrdinalIgnoreCase)
-        && now.Style.FrameBits == tracked.Style.FrameBits;
+    /// <summary>Whether the window behind a handle is still the one with this lifetime.</summary>
+    private static bool IsStillTheSameWindow(long lifetime, WindowInfo? now) => now is not null && now.Lifetime == lifetime;
 }

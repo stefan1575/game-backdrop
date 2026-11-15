@@ -25,6 +25,13 @@ public sealed class FakeWindowSystem : IWindowSystem
     private readonly List<FakeWindow> _windows = [];
     private nint _nextHandle = 0x1000;
     private int _nextProcessId = 100;
+    private long _nextLifetime = 1;
+
+    // Like the Win32 port: the lifetime it gave each handle when it first described it, dropped
+    // when that window's destruction reaches the port. Until then, a reused handle still reports
+    // the old lifetime.
+    private readonly Dictionary<WindowHandle, long> _lifetimes = [];
+    private readonly List<FakeWindow> _destroyedNotYetSeen = [];
 
     public event Action<WindowEvent>? WindowEvent;
 
@@ -43,7 +50,7 @@ public sealed class FakeWindowSystem : IWindowSystem
 
     public FakeWindow Open(FakeProcess process, WindowStyle style, Rect outer, bool show = true, WindowHandle? owner = null, bool menu = false, int menuRows = 1)
     {
-        var window = new FakeWindow(new WindowHandle(_nextHandle++), process, style, outer) { Owner = owner, HasMenu = menu, MenuRows = menuRows };
+        var window = new FakeWindow(new WindowHandle(_nextHandle++), process, style, outer, _nextLifetime++) { Owner = owner, HasMenu = menu, MenuRows = menuRows };
         _windows.Add(window);
         if (show) Show(window);
         return window;
@@ -58,21 +65,41 @@ public sealed class FakeWindowSystem : IWindowSystem
     /// <summary>The window closes (or its process exits).</summary>
     public void Close(FakeWindow window)
     {
-        _windows.Remove(window);
-        window.IsGone = true;
+        CloseWithEventPending(window);
         Raise(WindowEventKind.Destroyed, window);
     }
 
-    public void Raise(WindowEventKind kind, FakeWindow window) => WindowEvent?.Invoke(new WindowEvent(kind, window.Handle));
+    /// <summary>
+    /// Deliver an event. As on Win32, the port takes in every destruction reported before it
+    /// first, so a reused handle's events never carry the old window's lifetime.
+    /// </summary>
+    public void Raise(WindowEventKind kind, FakeWindow window)
+    {
+        TakeInDestructions();
+        var lifetime = kind == WindowEventKind.Destroyed ? window.Lifetime : _lifetimes.GetValueOrDefault(window.Handle);
+        WindowEvent?.Invoke(new WindowEvent(kind, window.Handle, lifetime));
+    }
 
     /// <summary>
-    /// The window is destroyed but its Destroyed event hasn't been delivered yet (the real one is
-    /// queued). Raise it later with <see cref="Raise"/>, which then refers to a stale handle.
+    /// The window is destroyed, but neither the port nor the controller has heard yet: the OS
+    /// event is still queued. Until the port catches up (or another event is delivered), its
+    /// handle still reports the old lifetime. Raise the Destroyed event later with
+    /// <see cref="Raise"/>, which then refers to a stale handle.
     /// </summary>
     public void CloseWithEventPending(FakeWindow window)
     {
         _windows.Remove(window);
         window.IsGone = true;
+        _destroyedNotYetSeen.Add(window);
+    }
+
+    public void CatchUp() => TakeInDestructions();
+
+    private void TakeInDestructions()
+    {
+        foreach (var gone in _destroyedNotYetSeen)
+            if (_lifetimes.TryGetValue(gone.Handle, out var known) && known == gone.Lifetime) _lifetimes.Remove(gone.Handle);
+        _destroyedNotYetSeen.Clear();
     }
 
     /// <summary>
@@ -82,7 +109,7 @@ public sealed class FakeWindowSystem : IWindowSystem
     public FakeWindow OpenWithReusedHandle(FakeWindow gone, FakeProcess process, WindowStyle style, Rect outer, bool show = true)
     {
         if (!gone.IsGone) throw new InvalidOperationException("Only a destroyed window's handle can be reused.");
-        var window = new FakeWindow(gone.Handle, process, style, outer);
+        var window = new FakeWindow(gone.Handle, process, style, outer, _nextLifetime++);
         _windows.Add(window);
         if (show) Show(window);
         return window;
@@ -94,7 +121,8 @@ public sealed class FakeWindowSystem : IWindowSystem
     {
         var w = Find(handle);
         if (w is null) return null;
-        return new WindowInfo(w.Handle, w.Process.Id, w.Process.ExePath, w.Outer, w.Client, w.Style,
+        if (!_lifetimes.TryGetValue(handle, out var lifetime)) _lifetimes[handle] = lifetime = w.Lifetime;
+        return new WindowInfo(w.Handle, lifetime, w.Process.Id, w.Process.ExePath, w.Outer, w.Client, w.Style,
             w.IsVisible, w.IsMinimized, w.Owner is not null, MonitorOf(w.Outer));
     }
 
@@ -142,12 +170,16 @@ public sealed class FakeWindowSystem : IWindowSystem
 
 public sealed record FakeProcess(FakeWindowSystem System, int Id, string ExePath, bool Elevated);
 
-public sealed class FakeWindow(WindowHandle handle, FakeProcess process, WindowStyle style, Rect outer)
+public sealed class FakeWindow(WindowHandle handle, FakeProcess process, WindowStyle style, Rect outer, long lifetime)
 {
     // The non-client frame a captioned window has: invisible resize borders plus the title bar.
     public const int FrameLeft = 8, FrameTop = 31, FrameRight = 8, FrameBottom = 8;
 
     public WindowHandle Handle { get; } = handle;
+
+    /// <summary>This window's own lifetime number: what the port reports for it once it has caught up.</summary>
+    public long Lifetime { get; } = lifetime;
+
     public FakeProcess Process { get; } = process;
     public WindowStyle Style { get; set; } = style;
     public Rect Outer { get; set; } = outer;

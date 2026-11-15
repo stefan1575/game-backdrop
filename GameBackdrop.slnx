@@ -6,6 +6,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/GameBackdrop.Core.Tests/GameBackdrop.Core.Tests.csproj" />
+    <Project Path="tests/GameBackdrop.Windows.Tests/GameBackdrop.Windows.Tests.csproj" />
   </Folder>
   <Folder Name="/tools/">
     <Project Path="tools/TestWindow/TestWindow.csproj" />

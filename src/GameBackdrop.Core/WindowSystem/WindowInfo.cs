@@ -9,6 +9,10 @@ public sealed record MonitorInfo(MonitorHandle Handle, Rect Bounds, Rect WorkAre
 public sealed record WindowFrame(WindowStyle Style, Rect Outer);
 
 /// <summary>A snapshot of one top-level window, as the port sees it right now.</summary>
+/// <param name="Lifetime">Which window is behind the handle. A handle can be reused by a new
+/// window once its window is destroyed, so the port numbers each window the first time it
+/// describes it and drops the number when that window's destroy event reaches it: a later window
+/// with the same handle gets a new number. It doesn't change when the window changes itself.</param>
 /// <param name="ProcessPath">Full path of the owning process's exe, or null when it can't be read.</param>
 /// <param name="Outer">The window rect (GetWindowRect).</param>
 /// <param name="Client">The client area in screen coordinates.</param>
@@ -16,6 +20,7 @@ public sealed record WindowFrame(WindowStyle Style, Rect Outer);
 /// <param name="Monitor">The monitor the window is on (nearest one).</param>
 public sealed record WindowInfo(
     WindowHandle Handle,
+    long Lifetime,
     int ProcessId,
     string? ProcessPath,
     Rect Outer,

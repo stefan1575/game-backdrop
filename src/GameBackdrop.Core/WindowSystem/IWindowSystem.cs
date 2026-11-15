@@ -26,6 +26,17 @@ public interface IWindowSystem
     /// </summary>
     Size OuterSizeFor(WindowHandle window, WindowStyle style, Size clientSize);
 
-    /// <summary>Set a window's styles and outer rect in one go, without activating it or changing its Z order.</summary>
+    /// <summary>
+    /// Set a window's styles and outer rect in one go, without activating it or changing its Z
+    /// order. For a minimised window the rect is its normal (restored) position and size, and it
+    /// stays minimised.
+    /// </summary>
     ChangeResult SetFrame(WindowHandle window, WindowFrame frame);
+
+    /// <summary>
+    /// Take in the window destructions the OS has already reported but the port hasn't seen yet,
+    /// so <see cref="WindowInfo.Lifetime"/> is current before a saved handle is acted on. Their
+    /// Destroyed events are still raised later, in order, never from inside this call.
+    /// </summary>
+    void CatchUp();
 }

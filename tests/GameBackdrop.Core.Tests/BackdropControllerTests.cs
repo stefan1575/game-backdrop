@@ -552,6 +552,64 @@ public sealed class BackdropControllerTests
     }
 
     [Fact]
+    public void A_game_that_changes_its_own_frame_after_the_restyle_is_still_put_back_on_quit()
+    {
+        var controller = StartController();
+        var game = _desktop.OpenWindowed(_desktop.StartProcess(Dota), new Size(800, 600), left: 50, top: 60);
+        game.Style = game.Style with { ExStyle = game.Style.ExStyle | WindowStyle.WS_EX_CLIENTEDGE };
+
+        Assert.Empty(controller.Stop());
+
+        AssertUntouched(game, new WindowFrame(FakeWindowSystem.Captioned, Rect.FromPosition(50, 60, new Size(816, 639))));
+    }
+
+    [Fact]
+    public void A_game_that_puts_its_title_bar_back_and_is_shown_again_keeps_its_first_original()
+    {
+        var controller = StartController();
+        var game = _desktop.OpenWindowed(_desktop.StartProcess(Dota), new Size(800, 600), left: 50, top: 60);
+        game.Style = FakeWindowSystem.Captioned;
+        game.Outer = Rect.FromPosition(400, 300, new Size(816, 639));
+        _desktop.Show(game);
+
+        controller.Stop();
+
+        AssertUntouched(game, new WindowFrame(FakeWindowSystem.Captioned, Rect.FromPosition(50, 60, new Size(816, 639))));
+    }
+
+    [Fact]
+    public void A_splash_that_changed_its_own_frame_is_still_put_back_when_the_game_window_replaces_it()
+    {
+        StartController();
+        var process = _desktop.StartProcess(Novel);
+        var splashRect = new Rect(100, 100, 500, 400);
+        var splash = _desktop.Open(process, FakeWindowSystem.Captioned, splashRect);
+        splash.Style = splash.Style with { ExStyle = splash.Style.ExStyle | WindowStyle.WS_EX_CLIENTEDGE };
+
+        _desktop.OpenWindowed(process, new Size(1280, 720));
+
+        AssertUntouched(splash, new WindowFrame(FakeWindowSystem.Captioned, splashRect));
+    }
+
+    [Fact]
+    public void A_game_s_new_popup_with_its_old_popup_s_handle_and_the_same_frame_styles_is_handled_as_new()
+    {
+        var controller = StartController();
+        var process = _desktop.StartProcess(Dota);
+        var captionedPopup = new WindowStyle(FakeWindowSystem.Popup.Style | WindowStyle.WS_CAPTION | WindowStyle.WS_THICKFRAME, 0);
+        var old = _desktop.Open(process, captionedPopup, Rect.FromPosition(50, 60, new Size(816, 639)));
+        Assert.False(old.HasBorder);
+        _desktop.CloseWithEventPending(old);
+        var replacementRect = Rect.FromPosition(200, 250, new Size(1280, 720));
+
+        var replacement = _desktop.OpenWithReusedHandle(old, process, old.Style, replacementRect);
+        _desktop.Raise(WindowEventKind.Destroyed, old);
+        controller.Stop();
+
+        AssertUntouched(replacement, new WindowFrame(FakeWindowSystem.Popup, replacementRect));
+    }
+
+    [Fact]
     public void After_quitting_new_game_windows_are_left_alone()
     {
         var controller = StartController();

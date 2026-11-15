@@ -11,7 +11,10 @@ public enum WindowEventKind
     MinimizeEnd,
 }
 
-public readonly record struct WindowEvent(WindowEventKind Kind, WindowHandle Window);
+/// <param name="Lifetime">Which lifetime of <paramref name="Window"/> the event is about (see
+/// <see cref="WindowInfo.Lifetime"/>). For Destroyed, the lifetime that just ended; 0 when the
+/// port never described that window.</param>
+public readonly record struct WindowEvent(WindowEventKind Kind, WindowHandle Window, long Lifetime);
 
 /// <summary>The outcome of asking the port to change a window.</summary>
 public enum ChangeResult

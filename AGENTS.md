@@ -29,7 +29,9 @@ in a settings file and start the app with `--settings <path>` to leave the real
 Layout: `src/GameBackdrop.Core` (no Win32: settings, game list, classifier, placement, and the
 `BackdropController` over the `IWindowSystem` port), `src/GameBackdrop.Windows` (the Win32
 port), `src/GameBackdrop` (tray app), `tests/GameBackdrop.Core.Tests` (a `FakeWindowSystem`
-drives the controller).
+drives the controller), `tests/GameBackdrop.Windows.Tests` (the Win32 port against real
+`TestWindow` windows; `dotnet test` briefly opens a few of them, and they need the solution
+built first in the same configuration).
 
 ## Ground rules
 
