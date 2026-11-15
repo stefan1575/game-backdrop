@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Native tests of the Win32 port against real windows of tools/TestWindow, which the solution
+       build builds first (same configuration). -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\GameBackdrop.Windows\GameBackdrop.Windows.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>TestWindowExe</_Parameter1>
+      <_Parameter2>$(MSBuildThisFileDirectory)..\..\tools\TestWindow\bin\$(Configuration)\net10.0-windows\win-x64\TestWindow.exe</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+</Project>

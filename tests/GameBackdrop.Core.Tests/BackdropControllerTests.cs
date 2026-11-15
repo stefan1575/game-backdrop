@@ -1,0 +1,668 @@
+using GameBackdrop.Core.Controller;
+using GameBackdrop.Core.Geometry;
+using GameBackdrop.Core.Games;
+using GameBackdrop.Core.Settings;
+using GameBackdrop.Core.WindowSystem;
+
+namespace GameBackdrop.Core.Tests;
+
+public sealed class BackdropControllerTests
+{
+    private const string Dota = @"C:\Games\dota 2 beta\game\bin\win64\dota2.exe";
+    private const string Novel = @"D:\VN\Novel\novel.exe";
+    private const string Notepad = @"C:\Windows\System32\notepad.exe";
+
+    private readonly FakeWindowSystem _desktop = new();
+    private readonly List<GameEntry> _games =
+    [
+        new() { ExePath = Dota, DisplayName = "Dota 2" },
+        new() { ExePath = Novel, DisplayName = "Novel" },
+    ];
+
+    private BackdropController StartController()
+    {
+        var controller = new BackdropController(_desktop, new GameList(_games));
+        controller.Start();
+        return controller;
+    }
+
+    private static void AssertUntouched(FakeWindow window, WindowFrame original)
+    {
+        Assert.Equal(original.Style, window.Style);
+        Assert.Equal(original.Outer, window.Outer);
+    }
+
+    [Fact]
+    public void A_windowed_game_loses_its_border_and_is_centred_on_its_monitor_at_its_own_size()
+    {
+        StartController();
+
+        var game = _desktop.OpenWindowed(_desktop.StartProcess(Dota), new Size(800, 600));
+
+        Assert.False(game.HasBorder);
+        Assert.Equal(new Rect(560, 240, 1360, 840), game.Outer);
+        Assert.Equal(game.Outer, game.Client);
+    }
+
+    [Fact]
+    public void A_windowed_game_on_another_monitor_is_centred_on_that_monitor()
+    {
+        StartController();
+
+        var game = _desktop.OpenWindowed(_desktop.StartProcess(Novel), new Size(1280, 720), left: 2000, top: 0);
+
+        Assert.False(game.HasBorder);
+        Assert.Equal(Rect.FromPosition(1920 + 640, -200 + 360, new Size(1280, 720)), game.Outer);
+    }
+
+    [Fact]
+    public void An_odd_sized_game_is_placed_on_whole_pixels()
+    {
+        StartController();
+
+        var game = _desktop.OpenWindowed(_desktop.StartProcess(Dota), new Size(801, 601));
+
+        Assert.Equal(Rect.FromPosition(559, 239, new Size(801, 601)), game.Outer);
+    }
+
+    [Fact]
+    public void A_game_with_a_menu_bar_keeps_its_client_size_and_is_centred_with_its_menu()
+    {
+        StartController();
+        var outer = Rect.FromPosition(100, 100, new Size(800 + 16, 600 + 31 + FakeWindow.MenuHeight + 8));
+
+        var game = _desktop.Open(_desktop.StartProcess(Novel), FakeWindowSystem.Captioned, outer, menu: true);
+
+        Assert.False(game.HasBorder);
+        Assert.Equal(new Size(800, 600), game.Client.Size);
+        Assert.Equal(Rect.FromPosition(560, 230, new Size(800, 620)), game.Outer);
+    }
+
+    [Fact]
+    public void A_game_whose_menu_bar_wraps_onto_two_rows_keeps_its_client_size()
+    {
+        StartController();
+        var menu = 2 * FakeWindow.MenuHeight;
+        var outer = Rect.FromPosition(100, 100, new Size(400 + 16, 600 + 31 + menu + 8));
+
+        var game = _desktop.Open(_desktop.StartProcess(Novel), FakeWindowSystem.Captioned, outer, menu: true, menuRows: 2);
+
+        Assert.False(game.HasBorder);
+        Assert.Equal(new Size(400, 600), game.Client.Size);
+        Assert.Equal(Rect.FromPosition(760, 220, new Size(400, 640)), game.Outer);
+    }
+
+    [Fact]
+    public void A_game_larger_than_its_monitor_keeps_its_top_left_on_the_monitor()
+    {
+        StartController();
+
+        var game = _desktop.OpenWindowed(_desktop.StartProcess(Dota), new Size(2000, 1200), left: 100, top: 100);
+
+        Assert.Equal(Rect.FromPosition(0, 0, new Size(2000, 1200)), game.Outer);
+    }
+
+    [Fact]
+    public void A_game_wider_but_not_taller_than_its_monitor_is_still_centred_vertically()
+    {
+        StartController();
+
+        var game = _desktop.OpenWindowed(_desktop.StartProcess(Dota), new Size(2000, 600), left: 0, top: 0);
+
+        Assert.Equal(Rect.FromPosition(0, 240, new Size(2000, 600)), game.Outer);
+    }
+
+    [Fact]
+    public void A_borderless_fullscreen_game_is_left_alone()
+    {
+        StartController();
+
+        var game = _desktop.OpenPopup(_desktop.StartProcess(Dota), FakeWindowSystem.Primary.Bounds);
+
+        AssertUntouched(game, new WindowFrame(FakeWindowSystem.Popup, FakeWindowSystem.Primary.Bounds));
+        Assert.Empty(_desktop.FrameChanges);
+    }
+
+    [Fact]
+    public void A_captioned_game_whose_client_area_fills_its_monitor_is_stripped_and_still_fills_it()
+    {
+        StartController();
+        var overhanging = new Rect(-8, -31, 1928, 1088); // the client area is exactly the monitor
+
+        var game = _desktop.Open(_desktop.StartProcess(Dota), FakeWindowSystem.Captioned, overhanging);
+
+        Assert.False(game.HasBorder);
+        Assert.Equal(FakeWindowSystem.Primary.Bounds, game.Outer);
+    }
+
+    [Fact]
+    public void A_captioned_game_whose_client_area_is_the_monitor_s_size_is_stripped_and_centred()
+    {
+        StartController();
+
+        var game = _desktop.OpenWindowed(_desktop.StartProcess(Dota), FakeWindowSystem.Primary.Bounds.Size, left: 100, top: 100);
+
+        Assert.False(game.HasBorder);
+        Assert.Equal(FakeWindowSystem.Primary.Bounds, game.Outer);
+    }
+
+    [Fact]
+    public void A_game_whose_outer_rect_but_not_client_area_covers_its_monitor_counts_as_windowed()
+    {
+        StartController();
+        // A thick-frame-only window: its outer rect covers the monitor, its client area is inset by the frame.
+        var thickFrame = new WindowStyle(0x94040000, 0);
+        var game = _desktop.Open(_desktop.StartProcess(Dota), thickFrame, new Rect(-8, 0, 1928, 1088));
+
+        Assert.False(game.HasBorder);
+        Assert.Equal(Rect.FromPosition(0, 4, new Size(1920, 1072)), game.Outer);
+    }
+
+    [Fact]
+    public void A_window_that_only_fills_the_work_area_counts_as_windowed()
+    {
+        StartController();
+
+        var game = _desktop.OpenPopup(_desktop.StartProcess(Dota), FakeWindowSystem.Primary.WorkArea);
+
+        Assert.NotEmpty(_desktop.FrameChanges);
+        Assert.Equal(Rect.FromPosition(0, 24, FakeWindowSystem.Primary.WorkArea.Size), game.Outer);
+    }
+
+    [Fact]
+    public void An_unlisted_program_is_left_alone()
+    {
+        StartController();
+
+        var other = _desktop.OpenWindowed(_desktop.StartProcess(Notepad), new Size(800, 600));
+
+        Assert.True(other.HasBorder);
+        Assert.Empty(_desktop.FrameChanges);
+    }
+
+    [Fact]
+    public void A_disabled_game_is_left_alone()
+    {
+        _games[0].Enabled = false;
+        StartController();
+
+        var game = _desktop.OpenWindowed(_desktop.StartProcess(Dota), new Size(800, 600));
+
+        Assert.True(game.HasBorder);
+        Assert.Empty(_desktop.FrameChanges);
+    }
+
+    [Fact]
+    public void A_game_entry_without_an_exe_path_matches_nothing_and_does_not_stop_other_games()
+    {
+        _games.Insert(0, new GameEntry { ExePath = null! });
+        StartController();
+
+        var game = _desktop.OpenWindowed(_desktop.StartProcess(Dota), new Size(800, 600));
+
+        Assert.False(game.HasBorder);
+    }
+
+    [Fact]
+    public void A_game_is_matched_by_its_full_path_whatever_the_case()
+    {
+        StartController();
+
+        var game = _desktop.OpenWindowed(_desktop.StartProcess(Dota.ToUpperInvariant()), new Size(800, 600));
+        var sameNameElsewhere = _desktop.OpenWindowed(_desktop.StartProcess(@"E:\Other\dota2.exe"), new Size(800, 600));
+
+        Assert.False(game.HasBorder);
+        Assert.True(sameNameElsewhere.HasBorder);
+    }
+
+    [Fact]
+    public void A_game_already_running_when_the_app_starts_is_restyled()
+    {
+        var game = _desktop.OpenWindowed(_desktop.StartProcess(Dota), new Size(800, 600));
+
+        StartController();
+
+        Assert.False(game.HasBorder);
+        Assert.Equal(new Rect(560, 240, 1360, 840), game.Outer);
+    }
+
+    [Fact]
+    public void Hidden_and_minimised_windows_are_not_touched()
+    {
+        var process = _desktop.StartProcess(Dota);
+        var hidden = _desktop.OpenWindowed(process, new Size(800, 600), show: false);
+        var minimised = _desktop.OpenWindowed(_desktop.StartProcess(Novel), new Size(800, 600), show: false);
+        minimised.IsVisible = true;
+        minimised.IsMinimized = true;
+
+        StartController();
+
+        Assert.True(hidden.HasBorder);
+        Assert.True(minimised.HasBorder);
+    }
+
+    [Fact]
+    public void A_game_s_dialogs_and_tool_windows_are_not_touched()
+    {
+        StartController();
+        var process = _desktop.StartProcess(Dota);
+        var main = _desktop.OpenWindowed(process, new Size(800, 600));
+
+        var dialog = _desktop.Open(process, FakeWindowSystem.Captioned, new Rect(100, 100, 400, 300), owner: main.Handle);
+        var tool = _desktop.Open(process, FakeWindowSystem.Captioned with { ExStyle = WindowStyle.WS_EX_TOOLWINDOW }, new Rect(100, 100, 400, 300));
+
+        Assert.True(dialog.HasBorder);
+        Assert.True(tool.HasBorder);
+        Assert.False(main.HasBorder);
+    }
+
+    [Fact]
+    public void The_real_game_window_replaces_a_splash_screen_which_is_put_back()
+    {
+        StartController();
+        var process = _desktop.StartProcess(Novel);
+        var splashRect = new Rect(100, 100, 500, 400);
+        var splash = _desktop.OpenPopup(process, splashRect);
+
+        var game = _desktop.OpenWindowed(process, new Size(1280, 720));
+
+        Assert.False(game.HasBorder);
+        Assert.Equal(Rect.FromPosition(320, 180, new Size(1280, 720)), game.Outer);
+        AssertUntouched(splash, new WindowFrame(FakeWindowSystem.Popup, splashRect));
+    }
+
+    [Fact]
+    public void A_smaller_frameless_window_does_not_replace_the_game_window()
+    {
+        StartController();
+        var process = _desktop.StartProcess(Novel);
+        var game = _desktop.OpenWindowed(process, new Size(1280, 720));
+        var placed = game.Outer;
+
+        var popup = _desktop.OpenPopup(process, new Rect(0, 0, 300, 200));
+
+        Assert.Equal(placed, game.Outer);
+        Assert.False(game.HasBorder);
+        Assert.Equal(new Rect(0, 0, 300, 200), popup.Outer);
+    }
+
+    [Fact]
+    public void Quitting_restores_every_changed_game()
+    {
+        var controller = StartController();
+        var dota = _desktop.OpenWindowed(_desktop.StartProcess(Dota), new Size(800, 600), left: 50, top: 60);
+        var novel = _desktop.OpenWindowed(_desktop.StartProcess(Novel), new Size(1280, 720), left: 2000, top: 10);
+        var dotaOriginal = new WindowFrame(FakeWindowSystem.Captioned, Rect.FromPosition(50, 60, new Size(816, 639)));
+        var novelOriginal = new WindowFrame(FakeWindowSystem.Captioned, Rect.FromPosition(2000, 10, new Size(1296, 759)));
+
+        controller.Stop();
+
+        AssertUntouched(dota, dotaOriginal);
+        AssertUntouched(novel, novelOriginal);
+    }
+
+    [Fact]
+    public void A_restore_that_fails_keeps_the_original_and_a_later_restore_puts_the_game_back()
+    {
+        var controller = StartController();
+        var game = _desktop.OpenWindowed(_desktop.StartProcess(Dota), new Size(800, 600), left: 50, top: 60);
+        _desktop.FailNextChanges(game, ChangeResult.Failed);
+
+        var notRestored = controller.RestoreAll();
+
+        Assert.Single(notRestored);
+        Assert.False(game.HasBorder);
+
+        Assert.Empty(controller.RestoreAll());
+        AssertUntouched(game, new WindowFrame(FakeWindowSystem.Captioned, Rect.FromPosition(50, 60, new Size(816, 639))));
+    }
+
+    [Fact]
+    public void Quitting_reports_a_game_it_could_not_put_back_and_quitting_again_retries_it()
+    {
+        var controller = StartController();
+        var dota = _desktop.OpenWindowed(_desktop.StartProcess(Dota), new Size(800, 600), left: 50, top: 60);
+        var novel = _desktop.OpenWindowed(_desktop.StartProcess(Novel), new Size(800, 600), left: 70, top: 80);
+        _desktop.FailNextChanges(dota, ChangeResult.Failed);
+
+        var notRestored = controller.Stop();
+
+        Assert.Equal(dota.Handle, Assert.Single(notRestored).Window);
+        AssertUntouched(novel, new WindowFrame(FakeWindowSystem.Captioned, Rect.FromPosition(70, 80, new Size(816, 639))));
+
+        Assert.Empty(controller.Stop());
+        AssertUntouched(dota, new WindowFrame(FakeWindowSystem.Captioned, Rect.FromPosition(50, 60, new Size(816, 639))));
+    }
+
+    [Fact]
+    public void A_half_failed_restore_is_retried()
+    {
+        var controller = StartController();
+        var game = _desktop.OpenWindowed(_desktop.StartProcess(Dota), new Size(800, 600), left: 50, top: 60);
+        _desktop.FailNextChanges(game, ChangeResult.PartlyChanged);
+
+        Assert.Single(controller.Stop());
+        Assert.Empty(controller.Stop());
+
+        AssertUntouched(game, new WindowFrame(FakeWindowSystem.Captioned, Rect.FromPosition(50, 60, new Size(816, 639))));
+    }
+
+    [Fact]
+    public void A_splash_screen_that_could_not_be_put_back_is_retried_on_quit()
+    {
+        var controller = StartController();
+        var process = _desktop.StartProcess(Novel);
+        var splashRect = new Rect(100, 100, 500, 400);
+        var splash = _desktop.Open(process, FakeWindowSystem.Captioned, splashRect);
+        _desktop.FailNextChanges(splash, ChangeResult.Failed);
+
+        var game = _desktop.OpenWindowed(process, new Size(1280, 720));
+
+        Assert.False(game.HasBorder);
+        Assert.False(splash.HasBorder);
+        Assert.Empty(controller.Stop());
+        AssertUntouched(splash, new WindowFrame(FakeWindowSystem.Captioned, splashRect));
+        Assert.True(game.HasBorder);
+    }
+
+    [Fact]
+    public void A_restyle_that_half_fails_is_still_put_back_on_quit()
+    {
+        var controller = StartController();
+        var process = _desktop.StartProcess(Dota);
+        var game = _desktop.OpenWindowed(process, new Size(800, 600), left: 50, top: 60, show: false);
+        _desktop.FailNextChanges(game, ChangeResult.PartlyChanged);
+        _desktop.Show(game);
+        Assert.False(game.HasBorder); // the styles changed, the rect didn't
+
+        Assert.Empty(controller.Stop());
+
+        AssertUntouched(game, new WindowFrame(FakeWindowSystem.Captioned, Rect.FromPosition(50, 60, new Size(816, 639))));
+    }
+
+    [Fact]
+    public void Quitting_leaves_a_fullscreen_game_alone()
+    {
+        var controller = StartController();
+        _desktop.OpenPopup(_desktop.StartProcess(Dota), FakeWindowSystem.Primary.Bounds);
+
+        controller.Stop();
+
+        Assert.Empty(_desktop.FrameChanges);
+    }
+
+    [Fact]
+    public void A_game_that_exits_needs_nothing_restored()
+    {
+        var controller = StartController();
+        var game = _desktop.OpenWindowed(_desktop.StartProcess(Dota), new Size(800, 600));
+        _desktop.Close(game);
+        var changesBeforeQuit = _desktop.FrameChanges.Count;
+
+        controller.Stop();
+
+        Assert.Equal(changesBeforeQuit, _desktop.FrameChanges.Count);
+    }
+
+    [Fact]
+    public void Quitting_leaves_alone_another_program_that_got_an_exited_game_s_window_handle()
+    {
+        var controller = StartController();
+        var game = _desktop.OpenWindowed(_desktop.StartProcess(Dota), new Size(800, 600));
+        _desktop.CloseWithEventPending(game);
+        var otherRect = new Rect(300, 300, 900, 800);
+        var other = _desktop.OpenWithReusedHandle(game, _desktop.StartProcess(Notepad), FakeWindowSystem.Captioned, otherRect, show: false);
+        other.IsVisible = true;
+
+        controller.Stop();
+
+        AssertUntouched(other, new WindowFrame(FakeWindowSystem.Captioned, otherRect));
+    }
+
+    [Fact]
+    public void Replacing_a_splash_leaves_alone_another_program_that_got_the_splash_s_handle()
+    {
+        StartController();
+        var process = _desktop.StartProcess(Novel);
+        var splash = _desktop.Open(process, FakeWindowSystem.Captioned, new Rect(100, 100, 500, 400));
+        _desktop.CloseWithEventPending(splash);
+        var otherRect = new Rect(300, 300, 900, 800);
+        var other = _desktop.OpenWithReusedHandle(splash, _desktop.StartProcess(Notepad), FakeWindowSystem.Captioned, otherRect, show: false);
+        other.IsVisible = true;
+
+        var game = _desktop.OpenWindowed(process, new Size(1280, 720));
+
+        Assert.False(game.HasBorder);
+        AssertUntouched(other, new WindowFrame(FakeWindowSystem.Captioned, otherRect));
+    }
+
+    [Fact]
+    public void A_late_destroy_event_for_a_reused_handle_does_not_forget_the_game_now_using_it()
+    {
+        var old = _desktop.OpenWindowed(_desktop.StartProcess(Dota), new Size(800, 600), show: false);
+        _desktop.CloseWithEventPending(old);
+        var game = _desktop.OpenWithReusedHandle(old, _desktop.StartProcess(Dota), FakeWindowSystem.Captioned,
+            Rect.FromPosition(50, 60, new Size(816, 639)), show: false);
+        game.IsVisible = true;
+        var controller = StartController();
+        Assert.False(game.HasBorder);
+
+        _desktop.Raise(WindowEventKind.Destroyed, old);
+        controller.Stop();
+
+        AssertUntouched(game, new WindowFrame(FakeWindowSystem.Captioned, Rect.FromPosition(50, 60, new Size(816, 639))));
+    }
+
+    [Fact]
+    public void A_game_window_that_gets_a_tracked_window_s_old_handle_is_handled_as_new()
+    {
+        var controller = StartController();
+        var old = _desktop.OpenWindowed(_desktop.StartProcess(Dota), new Size(800, 600));
+        _desktop.CloseWithEventPending(old); // its Destroyed event is lost or still queued
+
+        var novel = _desktop.OpenWithReusedHandle(old, _desktop.StartProcess(Novel), FakeWindowSystem.Captioned,
+            Rect.FromPosition(70, 80, new Size(1296, 759)));
+
+        Assert.False(novel.HasBorder);
+        Assert.Equal(Rect.FromPosition(320, 180, new Size(1280, 720)), novel.Outer);
+        controller.Stop();
+        AssertUntouched(novel, new WindowFrame(FakeWindowSystem.Captioned, Rect.FromPosition(70, 80, new Size(1296, 759))));
+    }
+
+    [Fact]
+    public void A_game_s_new_window_that_gets_its_old_window_s_handle_is_handled_as_new_and_put_back_as_itself()
+    {
+        var controller = StartController();
+        var process = _desktop.StartProcess(Dota);
+        var old = _desktop.OpenWindowed(process, new Size(800, 600), left: 50, top: 60);
+        _desktop.CloseWithEventPending(old);
+        var replacementRect = Rect.FromPosition(200, 250, new Size(1296, 759));
+
+        var replacement = _desktop.OpenWithReusedHandle(old, process, FakeWindowSystem.Captioned, replacementRect);
+        Assert.False(replacement.HasBorder);
+        Assert.Equal(Rect.FromPosition(320, 180, new Size(1280, 720)), replacement.Outer);
+
+        _desktop.Raise(WindowEventKind.Destroyed, old);
+        controller.Stop();
+
+        AssertUntouched(replacement, new WindowFrame(FakeWindowSystem.Captioned, replacementRect));
+    }
+
+    [Fact]
+    public void A_game_minimised_or_disabled_by_its_own_dialog_at_quit_is_still_put_back()
+    {
+        const uint WS_MINIMIZE = 0x20000000, WS_DISABLED = 0x08000000, WS_VISIBLE = 0x10000000;
+        var controller = StartController();
+        var game = _desktop.OpenWindowed(_desktop.StartProcess(Dota), new Size(800, 600), left: 50, top: 60);
+        game.Style = game.Style with { Style = (game.Style.Style | WS_MINIMIZE | WS_DISABLED) & ~WS_VISIBLE };
+
+        Assert.Empty(controller.Stop());
+
+        Assert.True(game.HasBorder);
+        Assert.Equal(Rect.FromPosition(50, 60, new Size(816, 639)), game.Outer);
+    }
+
+    [Fact]
+    public void Quitting_leaves_alone_a_game_s_new_window_with_its_old_window_s_handle_not_yet_seen()
+    {
+        var controller = StartController();
+        var process = _desktop.StartProcess(Dota);
+        var old = _desktop.OpenWindowed(process, new Size(800, 600), left: 50, top: 60);
+        _desktop.CloseWithEventPending(old);
+        var replacementRect = Rect.FromPosition(200, 250, new Size(1296, 759));
+        var replacement = _desktop.OpenWithReusedHandle(old, process, FakeWindowSystem.Captioned, replacementRect, show: false);
+        replacement.IsVisible = true;
+
+        controller.Stop();
+
+        AssertUntouched(replacement, new WindowFrame(FakeWindowSystem.Captioned, replacementRect));
+    }
+
+    [Fact]
+    public void A_late_destroy_event_for_a_game_s_old_window_forgets_it_when_its_new_window_has_the_handle()
+    {
+        var controller = StartController();
+        var process = _desktop.StartProcess(Dota);
+        var old = _desktop.OpenWindowed(process, new Size(800, 600), left: 50, top: 60);
+        _desktop.CloseWithEventPending(old);
+        var replacementRect = Rect.FromPosition(200, 250, new Size(1296, 759));
+        var replacement = _desktop.OpenWithReusedHandle(old, process, FakeWindowSystem.Captioned, replacementRect, show: false);
+        replacement.IsVisible = true;
+
+        _desktop.Raise(WindowEventKind.Destroyed, old);
+
+        Assert.Empty(controller.TrackedWindows);
+        controller.Stop();
+        AssertUntouched(replacement, new WindowFrame(FakeWindowSystem.Captioned, replacementRect));
+    }
+
+    [Fact]
+    public void A_windowed_game_window_that_gets_a_fullscreen_window_s_old_handle_in_the_same_game_is_restyled()
+    {
+        StartController();
+        var process = _desktop.StartProcess(Dota);
+        var fullscreen = _desktop.OpenPopup(process, FakeWindowSystem.Primary.Bounds);
+        _desktop.CloseWithEventPending(fullscreen);
+
+        var windowed = _desktop.OpenWithReusedHandle(fullscreen, process, FakeWindowSystem.Captioned,
+            Rect.FromPosition(100, 100, new Size(816, 639)));
+
+        Assert.False(windowed.HasBorder);
+        Assert.Equal(new Rect(560, 240, 1360, 840), windowed.Outer);
+    }
+
+    [Fact]
+    public void A_game_that_changes_its_own_frame_after_the_restyle_is_still_put_back_on_quit()
+    {
+        var controller = StartController();
+        var game = _desktop.OpenWindowed(_desktop.StartProcess(Dota), new Size(800, 600), left: 50, top: 60);
+        game.Style = game.Style with { ExStyle = game.Style.ExStyle | WindowStyle.WS_EX_CLIENTEDGE };
+
+        Assert.Empty(controller.Stop());
+
+        AssertUntouched(game, new WindowFrame(FakeWindowSystem.Captioned, Rect.FromPosition(50, 60, new Size(816, 639))));
+    }
+
+    [Fact]
+    public void A_game_that_puts_its_title_bar_back_and_is_shown_again_keeps_its_first_original()
+    {
+        var controller = StartController();
+        var game = _desktop.OpenWindowed(_desktop.StartProcess(Dota), new Size(800, 600), left: 50, top: 60);
+        game.Style = FakeWindowSystem.Captioned;
+        game.Outer = Rect.FromPosition(400, 300, new Size(816, 639));
+        _desktop.Show(game);
+
+        controller.Stop();
+
+        AssertUntouched(game, new WindowFrame(FakeWindowSystem.Captioned, Rect.FromPosition(50, 60, new Size(816, 639))));
+    }
+
+    [Fact]
+    public void A_splash_that_changed_its_own_frame_is_still_put_back_when_the_game_window_replaces_it()
+    {
+        StartController();
+        var process = _desktop.StartProcess(Novel);
+        var splashRect = new Rect(100, 100, 500, 400);
+        var splash = _desktop.Open(process, FakeWindowSystem.Captioned, splashRect);
+        splash.Style = splash.Style with { ExStyle = splash.Style.ExStyle | WindowStyle.WS_EX_CLIENTEDGE };
+
+        _desktop.OpenWindowed(process, new Size(1280, 720));
+
+        AssertUntouched(splash, new WindowFrame(FakeWindowSystem.Captioned, splashRect));
+    }
+
+    [Fact]
+    public void A_game_s_new_popup_with_its_old_popup_s_handle_and_the_same_frame_styles_is_handled_as_new()
+    {
+        var controller = StartController();
+        var process = _desktop.StartProcess(Dota);
+        var captionedPopup = new WindowStyle(FakeWindowSystem.Popup.Style | WindowStyle.WS_CAPTION | WindowStyle.WS_THICKFRAME, 0);
+        var old = _desktop.Open(process, captionedPopup, Rect.FromPosition(50, 60, new Size(816, 639)));
+        Assert.False(old.HasBorder);
+        _desktop.CloseWithEventPending(old);
+        var replacementRect = Rect.FromPosition(200, 250, new Size(1280, 720));
+
+        var replacement = _desktop.OpenWithReusedHandle(old, process, old.Style, replacementRect);
+        _desktop.Raise(WindowEventKind.Destroyed, old);
+        controller.Stop();
+
+        AssertUntouched(replacement, new WindowFrame(FakeWindowSystem.Popup, replacementRect));
+    }
+
+    [Fact]
+    public void A_shown_event_posted_before_its_window_was_destroyed_handles_the_window_now_using_the_handle_as_new()
+    {
+        var process = _desktop.StartProcess(Dota);
+        var old = _desktop.Open(process, FakeWindowSystem.Captioned, Rect.FromPosition(50, 60, new Size(816, 639)), show: false);
+        var controller = StartController(); // describes the hidden window, without tracking it
+        old.IsVisible = true;               // its Shown event is posted, not yet handled
+        _desktop.CloseWithEventPending(old);
+        var replacementRect = Rect.FromPosition(200, 250, new Size(1296, 759));
+        var replacement = _desktop.OpenWithReusedHandle(old, process, FakeWindowSystem.Captioned, replacementRect, show: false);
+        replacement.IsVisible = true;
+
+        _desktop.RaiseStale(WindowEventKind.Shown, old);
+        Assert.False(replacement.HasBorder);
+        _desktop.RaiseStale(WindowEventKind.Destroyed, old);
+        Assert.Single(controller.TrackedWindows);
+        Assert.Empty(controller.Stop());
+
+        AssertUntouched(replacement, new WindowFrame(FakeWindowSystem.Captioned, replacementRect));
+    }
+
+    [Fact]
+    public void After_quitting_new_game_windows_are_left_alone()
+    {
+        var controller = StartController();
+        controller.Stop();
+
+        var game = _desktop.OpenWindowed(_desktop.StartProcess(Dota), new Size(800, 600));
+
+        Assert.True(game.HasBorder);
+    }
+
+    [Fact]
+    public void A_game_the_app_may_not_touch_is_left_as_it_is_and_not_restored_on_quit()
+    {
+        var controller = StartController();
+        var game = _desktop.OpenWindowed(_desktop.StartProcess(Dota, elevated: true), new Size(800, 600));
+        var attempts = _desktop.FrameChanges.Count;
+
+        controller.Stop();
+
+        Assert.True(game.HasBorder);
+        Assert.Equal(attempts, _desktop.FrameChanges.Count);
+    }
+
+    [Fact]
+    public void Showing_a_restyled_game_again_does_not_restyle_it_twice()
+    {
+        var controller = StartController();
+        var game = _desktop.OpenWindowed(_desktop.StartProcess(Dota), new Size(800, 600), left: 50, top: 60);
+
+        _desktop.Show(game);
+        controller.Stop();
+
+        AssertUntouched(game, new WindowFrame(FakeWindowSystem.Captioned, Rect.FromPosition(50, 60, new Size(816, 639))));
+    }
+}

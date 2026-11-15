@@ -1,0 +1,31 @@
+namespace GameBackdrop.Core.WindowSystem;
+
+/// <summary>The window events the port reports (from SetWinEventHook on Windows).</summary>
+public enum WindowEventKind
+{
+    Shown,
+    Destroyed,
+    Foreground,
+    LocationChanged,
+    MinimizeStart,
+    MinimizeEnd,
+}
+
+/// <param name="Lifetime">Which lifetime of <paramref name="Window"/> the event is about (see
+/// <see cref="WindowInfo.Lifetime"/>). For Destroyed, the lifetime that just ended; 0 when the
+/// port never described that window.</param>
+public readonly record struct WindowEvent(WindowEventKind Kind, WindowHandle Window, long Lifetime);
+
+/// <summary>The outcome of asking the port to change a window.</summary>
+public enum ChangeResult
+{
+    Ok,
+    /// <summary>The window belongs to a process we may not touch (an elevated game).</summary>
+    AccessDenied,
+    /// <summary>The window no longer exists.</summary>
+    WindowGone,
+    /// <summary>The change failed for another reason; the window was left as it was.</summary>
+    Failed,
+    /// <summary>The change failed part-way and couldn't be undone: the window may be half-changed.</summary>
+    PartlyChanged,
+}
