@@ -1,0 +1,11 @@
+<Project>
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- Target .NET 10 (LTS). Roll forward so the build also runs where only a newer runtime
+         is installed (the local SDK is 11); the published exe is self-contained either way. -->
+    <RollForward>Major</RollForward>
+  </PropertyGroup>
+</Project>

@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The thin Win32 implementation of the core's window system port. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\GameBackdrop.Core\GameBackdrop.Core.csproj" />
+  </ItemGroup>
+</Project>

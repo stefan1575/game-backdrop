@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The decisions: game list, settings, classifier, placement, backdrop controller.
+       Plain net10.0 with no Windows references, so no Win32 call can creep in. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+</Project>
