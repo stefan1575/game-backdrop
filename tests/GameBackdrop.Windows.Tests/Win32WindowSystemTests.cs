@@ -67,13 +67,12 @@ public sealed class Win32WindowSystemTests : IDisposable
         var before = _windows.Describe(handle)!;
 
         _windows.SetFrame(handle, new WindowFrame(before.Style.Borderless(), Rect.FromPosition(10, 10, before.Client.Size)));
-        _windows.CatchUp();
 
         Assert.Equal(before.Lifetime, _windows.Describe(handle)!.Lifetime);
     }
 
     [Fact]
-    public void Catching_up_takes_in_a_window_s_destruction_and_its_handle_has_no_lifetime_left()
+    public void Describing_takes_in_a_window_s_destruction_first()
     {
         var handle = new WindowHandle(_hwnd);
         var lifetime = _windows.Describe(handle)!.Lifetime;
@@ -81,18 +80,17 @@ public sealed class Win32WindowSystemTests : IDisposable
         _testWindow.Kill();
         _testWindow.WaitForExit();
         WaitFor(() => IsWindow(_hwnd) ? 0 : 1, "the window to be destroyed");
-        _windows.CatchUp();
 
-        Assert.Contains(new WindowEvent(WindowEventKind.Destroyed, handle, lifetime), _events);
         Assert.Null(_windows.Describe(handle));
+        Assert.Contains(new WindowEvent(WindowEventKind.Destroyed, handle, lifetime), _events);
     }
 
     [Fact]
-    public void Catching_up_takes_in_destructions_queued_behind_a_posted_message()
+    public void Describing_any_window_takes_in_destructions_queued_behind_a_posted_message()
     {
         // The tray app's thread nearly always has posted messages waiting (WinForms posts its
-        // own): every destruction queued behind one must still be taken in by a single CatchUp,
-        // and the posted message left for the loop.
+        // own, and the controller's events are posted): every destruction queued behind one must
+        // be taken in by the next Describe, of any window, and the posted message left for the loop.
         using var second = StartTestWindow("--size 640x480");
         var secondHwnd = WaitFor(() => TestWindowOf(second.Id), "the second test window to open");
         var first = new WindowHandle(_hwnd);
@@ -107,7 +105,8 @@ public sealed class Win32WindowSystemTests : IDisposable
         second.WaitForExit();
         WaitFor(() => IsWindow(_hwnd) || IsWindow(secondHwnd) ? 0 : 1, "both windows to be destroyed");
         Thread.Sleep(200);
-        _windows.CatchUp();
+        Assert.DoesNotContain(_events, e => e.Kind == WindowEventKind.Destroyed && (e.Window == first || e.Window == other)); // nothing has pumped
+        _windows.Describe(new WindowHandle(GetDesktopWindow()));
 
         Assert.Contains(new WindowEvent(WindowEventKind.Destroyed, first, firstLifetime), _events);
         Assert.Contains(new WindowEvent(WindowEventKind.Destroyed, other, otherLifetime), _events);
@@ -159,6 +158,7 @@ public sealed class Win32WindowSystemTests : IDisposable
     [DllImport("user32.dll")] private static extern bool PostThreadMessage(uint threadId, uint msg, nint wParam, nint lParam);
     [DllImport("user32.dll")] private static extern bool PeekMessage(out MSG msg, nint hwnd, uint min, uint max, uint remove);
     [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
+    [DllImport("user32.dll")] private static extern nint GetDesktopWindow();
     private delegate bool EnumWindowsProc(nint hwnd, nint lParam);
     [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsProc proc, nint lParam);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(nint hwnd, out uint processId);

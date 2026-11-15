@@ -61,6 +61,7 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
 
     public WindowInfo? Describe(WindowHandle window)
     {
+        CatchUp();
         var hwnd = window.Value;
         if (!IsWindow(hwnd)) return null;
         GetWindowThreadProcessId(hwnd, out var processId);
@@ -125,6 +126,10 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
         return error == ERROR_ACCESS_DENIED ? ChangeResult.AccessDenied : ChangeResult.Failed;
     }
 
+    /// <summary>
+    /// Take in the window destructions the OS has already reported, so lifetimes are current.
+    /// Public for the native tests; <see cref="Describe"/> calls it first.
+    /// </summary>
     public void CatchUp()
     {
         // Out-of-context WinEvents are queued to this thread and delivered while it checks its
@@ -132,7 +137,9 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
         // message (WinForms nearly always has one waiting) before reaching them. Filtering on a
         // message that is never posted makes it pass over the posted ones, deliver the pending
         // WinEvents (OnWinEvent runs, dropping destroyed windows' lifetimes) and remove nothing.
-        // Nothing is dispatched, so the controller never runs from inside this call.
+        // No posted message is dispatched, and the controller's events are posted, so it never
+        // runs from inside this call. (Like any PeekMessage, it does deliver messages other
+        // threads are sending to this thread's windows.)
         PeekMessage(out _, 0, NeverPosted, NeverPosted, PM_NOREMOVE);
     }
 

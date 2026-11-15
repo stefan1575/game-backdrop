@@ -610,6 +610,27 @@ public sealed class BackdropControllerTests
     }
 
     [Fact]
+    public void A_shown_event_posted_before_its_window_was_destroyed_handles_the_window_now_using_the_handle_as_new()
+    {
+        var process = _desktop.StartProcess(Dota);
+        var old = _desktop.Open(process, FakeWindowSystem.Captioned, Rect.FromPosition(50, 60, new Size(816, 639)), show: false);
+        var controller = StartController(); // describes the hidden window, without tracking it
+        old.IsVisible = true;               // its Shown event is posted, not yet handled
+        _desktop.CloseWithEventPending(old);
+        var replacementRect = Rect.FromPosition(200, 250, new Size(1296, 759));
+        var replacement = _desktop.OpenWithReusedHandle(old, process, FakeWindowSystem.Captioned, replacementRect, show: false);
+        replacement.IsVisible = true;
+
+        _desktop.RaiseStale(WindowEventKind.Shown, old);
+        Assert.False(replacement.HasBorder);
+        _desktop.RaiseStale(WindowEventKind.Destroyed, old);
+        Assert.Single(controller.TrackedWindows);
+        Assert.Empty(controller.Stop());
+
+        AssertUntouched(replacement, new WindowFrame(FakeWindowSystem.Captioned, replacementRect));
+    }
+
+    [Fact]
     public void After_quitting_new_game_windows_are_left_alone()
     {
         var controller = StartController();

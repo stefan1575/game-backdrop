@@ -16,7 +16,13 @@ public interface IWindowSystem
     /// <summary>All top-level windows, visible or not, in Z order.</summary>
     IReadOnlyList<WindowHandle> TopLevelWindows();
 
-    /// <summary>The window as it is now, or null if it no longer exists.</summary>
+    /// <summary>
+    /// The window as it is now, or null if it no longer exists. Its <see cref="WindowInfo.Lifetime"/>
+    /// is current: the port first takes in the window destructions the OS has already reported,
+    /// so even an event handled late (posted before a destruction) never sees a dead window's
+    /// lifetime on a handle reused since. Their Destroyed events are still raised later, in
+    /// order, never from inside this call.
+    /// </summary>
     WindowInfo? Describe(WindowHandle window);
 
     /// <summary>
@@ -32,11 +38,4 @@ public interface IWindowSystem
     /// stays minimised.
     /// </summary>
     ChangeResult SetFrame(WindowHandle window, WindowFrame frame);
-
-    /// <summary>
-    /// Take in the window destructions the OS has already reported but the port hasn't seen yet,
-    /// so <see cref="WindowInfo.Lifetime"/> is current before a saved handle is acted on. Their
-    /// Destroyed events are still raised later, in order, never from inside this call.
-    /// </summary>
-    void CatchUp();
 }

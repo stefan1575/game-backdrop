@@ -61,8 +61,6 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
         if (_running) return;
         _running = true;
         windows.WindowEvent += OnWindowEvent;
-        // Destructions reported before now must not be taken for the windows found below.
-        windows.CatchUp();
         foreach (var window in windows.TopLevelWindows()) Consider(window);
     }
 
@@ -201,9 +199,7 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
     {
         if (tracked.State is not (TrackedState.Restyled or TrackedState.RestorePending)) return true;
         // A window that has gone needs nothing back, and its handle may now be another window
-        // (another program's, or a new one of the same game). Destructions the OS has reported
-        // but the port hasn't seen yet are taken in first, so the lifetime is current.
-        windows.CatchUp();
+        // (another program's, or a new one of the same game): Describe's lifetime is current.
         if (!IsStillTheSameWindow(tracked.Lifetime, windows.Describe(tracked.Window))) return true;
         return windows.SetFrame(tracked.Window, tracked.Original) is ChangeResult.Ok or ChangeResult.WindowGone;
     }

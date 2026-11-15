@@ -76,14 +76,24 @@ public sealed class FakeWindowSystem : IWindowSystem
     public void Raise(WindowEventKind kind, FakeWindow window)
     {
         TakeInDestructions();
+        RaiseStale(kind, window);
+    }
+
+    /// <summary>
+    /// Deliver an event that was posted to the controller before the pending destructions reached
+    /// the port: on Win32 the controller's events are posted, so one already queued can run before
+    /// a later destruction is taken in.
+    /// </summary>
+    public void RaiseStale(WindowEventKind kind, FakeWindow window)
+    {
         var lifetime = kind == WindowEventKind.Destroyed ? window.Lifetime : _lifetimes.GetValueOrDefault(window.Handle);
         WindowEvent?.Invoke(new WindowEvent(kind, window.Handle, lifetime));
     }
 
     /// <summary>
     /// The window is destroyed, but neither the port nor the controller has heard yet: the OS
-    /// event is still queued. Until the port catches up (or another event is delivered), its
-    /// handle still reports the old lifetime. Raise the Destroyed event later with
+    /// event is still queued. The port takes it in at its next Describe or event; an event posted
+    /// earlier (<see cref="RaiseStale"/>) can still reach the controller before that. Raise the Destroyed event later with
     /// <see cref="Raise"/>, which then refers to a stale handle.
     /// </summary>
     public void CloseWithEventPending(FakeWindow window)
@@ -92,8 +102,6 @@ public sealed class FakeWindowSystem : IWindowSystem
         window.IsGone = true;
         _destroyedNotYetSeen.Add(window);
     }
-
-    public void CatchUp() => TakeInDestructions();
 
     private void TakeInDestructions()
     {
@@ -119,6 +127,7 @@ public sealed class FakeWindowSystem : IWindowSystem
 
     public WindowInfo? Describe(WindowHandle handle)
     {
+        TakeInDestructions(); // as the port does: Describe's lifetime is current
         var w = Find(handle);
         if (w is null) return null;
         if (!_lifetimes.TryGetValue(handle, out var lifetime)) _lifetimes[handle] = lifetime = w.Lifetime;
