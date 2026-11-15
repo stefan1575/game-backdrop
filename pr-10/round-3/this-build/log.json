@@ -1,0 +1,42 @@
+[
+  {
+    "name": "r3-01-self-before",
+    "scene": "S1: test window A, app not running",
+    "style": "0x14CF0000",
+    "ex": "0x00000100",
+    "outer": "(100,100) 816x639",
+    "client": "(108,131) 800x600"
+  },
+  {
+    "name": "r3-04-min-before",
+    "scene": "S6: test window B, app not running",
+    "style": "0x14CF0000",
+    "ex": "0x00000100",
+    "outer": "(100,100) 656x519",
+    "client": "(108,131) 640x480"
+  },
+  {
+    "name": "r3-02-self-changed",
+    "scene": "S1: app restyled A, then A added WS_EX_CLIENTEDGE itself",
+    "style": "0x14020000",
+    "ex": "0x00000200",
+    "outer": "(880,420) 800x600",
+    "client": "(882,422) 796x596"
+  },
+  {
+    "name": "r3-03-self-after-quit",
+    "scene": "S1: after Quit, A should have its original frame back",
+    "style": "0x14CF0000",
+    "ex": "0x00000100",
+    "outer": "(100,100) 816x639",
+    "client": "(108,131) 800x600"
+  },
+  {
+    "name": "r3-05-min-reopened",
+    "scene": "S6: B was minimised at Quit; reopened afterwards",
+    "style": "0x14CF0000",
+    "ex": "0x00000100",
+    "outer": "(100,100) 656x519",
+    "client": "(108,131) 640x480"
+  }
+]
