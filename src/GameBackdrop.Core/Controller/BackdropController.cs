@@ -13,7 +13,7 @@ public enum TrackedState
     Fullscreen,
     /// <summary>The window was made borderless and centred; <see cref="TrackedWindow.Original"/> puts it back.</summary>
     Restyled,
-    /// <summary>The port refused the change (an elevated game): nothing was changed.</summary>
+    /// <summary>The port refused the change (an elevated game): nothing was changed, and it isn't retried.</summary>
     AccessDenied,
 }
 
@@ -123,6 +123,8 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
                     state = TrackedState.AccessDenied;
                     break;
                 case ChangeResult.WindowGone:
+                case ChangeResult.Failed:
+                    // Nothing was changed; a later Shown event gets another try.
                     return;
             }
         }

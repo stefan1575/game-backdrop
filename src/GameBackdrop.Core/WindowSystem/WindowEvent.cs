@@ -21,4 +21,6 @@ public enum ChangeResult
     AccessDenied,
     /// <summary>The window no longer exists.</summary>
     WindowGone,
+    /// <summary>The change failed for another reason; the window was left as it was.</summary>
+    Failed,
 }
