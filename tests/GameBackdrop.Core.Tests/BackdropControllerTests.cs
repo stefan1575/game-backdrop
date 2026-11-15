@@ -97,14 +97,38 @@ public sealed class BackdropControllerTests
     }
 
     [Fact]
-    public void A_fullscreen_game_whose_frame_overhangs_its_monitor_is_left_alone()
+    public void A_captioned_game_whose_client_area_fills_its_monitor_is_stripped_and_still_fills_it()
     {
         StartController();
-        var overhanging = new Rect(-8, -31, 1928, 1088);
+        var overhanging = new Rect(-8, -31, 1928, 1088); // the client area is exactly the monitor
 
         var game = _desktop.Open(_desktop.StartProcess(Dota), FakeWindowSystem.Captioned, overhanging);
 
-        AssertUntouched(game, new WindowFrame(FakeWindowSystem.Captioned, overhanging));
+        Assert.False(game.HasBorder);
+        Assert.Equal(FakeWindowSystem.Primary.Bounds, game.Outer);
+    }
+
+    [Fact]
+    public void A_captioned_game_whose_client_area_is_the_monitor_s_size_is_stripped_and_centred()
+    {
+        StartController();
+
+        var game = _desktop.OpenWindowed(_desktop.StartProcess(Dota), FakeWindowSystem.Primary.Bounds.Size, left: 100, top: 100);
+
+        Assert.False(game.HasBorder);
+        Assert.Equal(FakeWindowSystem.Primary.Bounds, game.Outer);
+    }
+
+    [Fact]
+    public void A_game_whose_outer_rect_but_not_client_area_covers_its_monitor_counts_as_windowed()
+    {
+        StartController();
+        // A thick-frame-only window: its outer rect covers the monitor, its client area is inset by the frame.
+        var thickFrame = new WindowStyle(0x94040000, 0);
+        var game = _desktop.Open(_desktop.StartProcess(Dota), thickFrame, new Rect(-8, 0, 1928, 1088));
+
+        Assert.False(game.HasBorder);
+        Assert.Equal(Rect.FromPosition(0, 4, new Size(1920, 1072)), game.Outer);
     }
 
     [Fact]

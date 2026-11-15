@@ -111,7 +111,7 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
     private void Track(WindowInfo info, GameEntry game)
     {
         var state = TrackedState.Fullscreen;
-        if (WindowClassifier.Classify(info.Outer, info.Monitor.Bounds) == WindowMode.Windowed)
+        if (WindowClassifier.Classify(info.Client, info.Style.HasCaption, info.Monitor.Bounds) == WindowMode.Windowed)
         {
             var target = new WindowFrame(info.Style.Borderless(), Placement.Centre(info.Client.Size, info.Monitor.Bounds));
             switch (windows.SetFrame(info.Handle, target))
