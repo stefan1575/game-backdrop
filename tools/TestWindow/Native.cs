@@ -86,6 +86,8 @@ internal static class Native
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern ushort RegisterClassEx(ref WNDCLASSEX wc);
     [DllImport("user32.dll")] public static extern nint LoadCursor(nint instance, int name);
     [DllImport("gdi32.dll")] public static extern nint CreateSolidBrush(uint color);
+    [DllImport("gdi32.dll")] public static extern bool DeleteObject(nint obj);
+    [DllImport("user32.dll")] public static extern int FrameRect(nint dc, ref RECT rect, nint brush);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     public static extern nint CreateWindowEx(uint exStyle, string className, string title, uint style,
