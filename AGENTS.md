@@ -21,6 +21,16 @@ dotnet test
 dotnet publish src/GameBackdrop -c Release   # single-file exe
 ```
 
+Checking the real Win32 path by hand: `tools/TestWindow` is a stand-in game (keys W windowed,
+F borderless fullscreen, R next size; or `--mode fullscreen`, `--size 1280x720`). List its exe
+in a settings file and start the app with `--settings <path>` to leave the real
+`%APPDATA%\GameBackdrop\settings.json` alone.
+
+Layout: `src/GameBackdrop.Core` (no Win32: settings, game list, classifier, placement, and the
+`BackdropController` over the `IWindowSystem` port), `src/GameBackdrop.Windows` (the Win32
+port), `src/GameBackdrop` (tray app), `tests/GameBackdrop.Core.Tests` (a `FakeWindowSystem`
+drives the controller).
+
 ## Ground rules
 
 - **Never inject into a game.** The app only moves, restyles and orders a game's window from the
