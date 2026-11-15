@@ -54,7 +54,9 @@ public interface IWindowSystem
     /// <summary>
     /// Cover <paramref name="bounds"/> exactly (a monitor's full bounds, taskbar area included)
     /// and show the backdrop without activating it, ordered directly behind
-    /// <paramref name="behind"/> in the Z order. It is never topmost.
+    /// <paramref name="behind"/> in the Z order. It is never topmost. If <paramref name="behind"/>
+    /// is the foreground window, it is first put in front of the other non-topmost windows, where
+    /// Windows is about to put it anyway; any other window keeps its place.
     /// </summary>
     void ShowBackdrop(BackdropHandle backdrop, Rect bounds, WindowHandle behind);
 

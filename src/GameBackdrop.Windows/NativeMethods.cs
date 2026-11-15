@@ -13,6 +13,8 @@ internal static class NativeMethods
     public const int GWL_STYLE = -16;
     public const int GWL_EXSTYLE = -20;
 
+    public const nint HWND_TOP = 0;
+
     public const uint SWP_NOSIZE = 0x0001;
     public const uint SWP_NOMOVE = 0x0002;
     public const uint SWP_NOZORDER = 0x0004;
@@ -231,6 +233,9 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool SetForegroundWindow(nint hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern nint GetForegroundWindow();
 
     [DllImport("user32.dll", EntryPoint = "LoadCursorW")]
     public static extern nint LoadCursor(nint hInstance, nint lpCursorName);

@@ -133,6 +133,69 @@ public sealed class Win32WindowSystemTests : IDisposable
     }
 
     [Fact]
+    public void A_backdrop_shown_behind_the_foreground_window_raises_that_window_to_the_top_first()
+    {
+        // Windows makes a window the foreground (and raises EVENT_SYSTEM_FOREGROUND) a moment
+        // before the window's own thread raises it: a backdrop ordered behind it in that gap would
+        // be left under whatever the window is about to jump over. This sets up that moment: the
+        // test window is the foreground, and another window sits above it. (Windows won't raise
+        // another window above the foreground one, so the foreground window is ordered behind it.)
+        using var otherProcess = StartTestWindow("--size 640x480");
+        var other = WaitFor(() => TestWindowOf(otherProcess.Id), "the other test window to open");
+        try
+        {
+            // A test process in the background may not take the foreground: then there is nothing to check.
+            if (!TryMakeForeground(_hwnd)) return;
+            SetWindowPos(_hwnd, other, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            if (GetForegroundWindow() != _hwnd || ZIndex(other) > ZIndex(_hwnd)) return;
+            var bounds = _windows.Describe(new WindowHandle(_hwnd))!.Monitor.Bounds;
+            var backdrop = _windows.CreateBackdrop();
+
+            _windows.ShowBackdrop(backdrop, bounds, new WindowHandle(_hwnd));
+
+            Assert.True(ZIndex(_hwnd) < ZIndex(other), "the foreground window is above the other window");
+            Assert.Equal(backdrop.Value, NextVisibleBelow(_hwnd));
+            Assert.Equal(_hwnd, GetForegroundWindow());
+        }
+        finally
+        {
+            otherProcess.Kill();
+        }
+    }
+
+    [Fact]
+    public void A_backdrop_shown_behind_a_window_that_is_not_the_foreground_does_not_raise_it()
+    {
+        // A third window is the foreground (Windows never raises a window above that one, so a
+        // raise would only show against a window that isn't), and the other window sits above
+        // the test window. Measured on Windows 11: from a process without the foreground, an
+        // HWND_TOP on a window that isn't the foreground is ignored anyway, so this pins the
+        // outcome (nothing raised) rather than the port's own check.
+        using var otherProcess = StartTestWindow("--size 640x480");
+        using var foregroundProcess = StartTestWindow("--size 320x240");
+        var other = WaitFor(() => TestWindowOf(otherProcess.Id), "the other test window to open");
+        var foreground = WaitFor(() => TestWindowOf(foregroundProcess.Id), "the foreground test window to open");
+        try
+        {
+            if (!TryMakeForeground(foreground)) return;
+            SetWindowPos(_hwnd, other, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            if (GetForegroundWindow() != foreground || ZIndex(other) > ZIndex(_hwnd)) return;
+            var bounds = _windows.Describe(new WindowHandle(_hwnd))!.Monitor.Bounds;
+            var backdrop = _windows.CreateBackdrop();
+
+            _windows.ShowBackdrop(backdrop, bounds, new WindowHandle(_hwnd));
+
+            Assert.True(ZIndex(other) < ZIndex(_hwnd), "the other window stays above the test window");
+            Assert.Equal(backdrop.Value, NextVisibleBelow(_hwnd));
+        }
+        finally
+        {
+            otherProcess.Kill();
+            foregroundProcess.Kill();
+        }
+    }
+
+    [Fact]
     public void Showing_a_backdrop_does_not_take_the_foreground()
     {
         var bounds = _windows.Describe(new WindowHandle(_hwnd))!.Monitor.Bounds;
@@ -219,6 +282,31 @@ public sealed class Win32WindowSystemTests : IDisposable
         Assert.Equal(ChangeResult.WindowGone, _windows.Activate(handle));
     }
 
+    /// <summary>
+    /// Make <paramref name="hwnd"/> the foreground window. A process in the background may not
+    /// take the foreground; a tap of ALT (down and up, no other key) lets it.
+    /// </summary>
+    private static bool TryMakeForeground(nint hwnd)
+    {
+        for (var attempt = 0; attempt < 5 && GetForegroundWindow() != hwnd; attempt++)
+        {
+            keybd_event(VK_MENU, 0, 0, 0);
+            SetForegroundWindow(hwnd);
+            keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);
+            Thread.Sleep(200);
+        }
+        return GetForegroundWindow() == hwnd;
+    }
+
+    /// <summary>The window's position in the desktop's Z order, front first.</summary>
+    private static int ZIndex(nint hwnd)
+    {
+        var index = 0;
+        for (var next = GetTopWindow(0); next != 0; next = GetWindow(next, GW_HWNDNEXT), index++)
+            if (next == hwnd) return index;
+        return int.MaxValue;
+    }
+
     /// <summary>The first visible window below <paramref name="hwnd"/> in the Z order.</summary>
     private static nint NextVisibleBelow(nint hwnd)
     {
@@ -278,6 +366,14 @@ public sealed class Win32WindowSystemTests : IDisposable
     [DllImport("user32.dll")] private static extern nint GetWindow(nint hwnd, uint command);
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern nint GetWindowLongPtr(nint hwnd, int index);
     [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern bool SetForegroundWindow(nint hwnd);
+    [DllImport("user32.dll")] private static extern nint GetTopWindow(nint hwnd);
+    [DllImport("user32.dll")] private static extern bool SetWindowPos(nint hwnd, nint insertAfter, int x, int y, int cx, int cy, uint flags);
+    [DllImport("user32.dll")] private static extern void keybd_event(byte vk, byte scan, uint flags, nint extraInfo);
+    private const nint HWND_TOP = 0;
+    private const uint SWP_NOSIZE = 0x1, SWP_NOMOVE = 0x2, SWP_NOACTIVATE = 0x10;
+    private const byte VK_MENU = 0x12;
+    private const uint KEYEVENTF_KEYUP = 0x2;
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint FindWindow(string className, string? windowName);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint SendMessage(nint hwnd, uint msg, nint wParam, nint lParam);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern bool PostMessage(nint hwnd, uint msg, nint wParam, nint lParam);

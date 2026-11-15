@@ -156,6 +156,13 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
     public void ShowBackdrop(BackdropHandle backdrop, Rect bounds, WindowHandle behind)
     {
         if (!_backdrops.Contains(backdrop.Value)) return;
+        // Windows makes a window the foreground (and reports it) a moment before the window's own
+        // thread raises it, longer for a busy game: ordered behind it in that gap, the backdrop
+        // would stay under every window the game then jumps over. So the foreground window is put
+        // at the top of the non-topmost band first, where Windows is about to put it anyway.
+        // Any other window keeps its place.
+        if (GetForegroundWindow() == behind.Value)
+            SetWindowPos(behind.Value, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
         SetWindowPos(backdrop.Value, behind.Value, bounds.Left, bounds.Top, bounds.Width, bounds.Height,
             SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOOWNERZORDER);
     }

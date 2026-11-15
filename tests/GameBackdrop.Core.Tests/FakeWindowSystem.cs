@@ -275,6 +275,7 @@ public sealed class FakeWindowSystem : IWindowSystem
         if (!Backdrops.TryGetValue(backdrop, out var b) || b.IsDestroyed) return;
         var window = Find(behind);
         if (window is null) return; // SetWindowPos fails on a stale insert-after handle
+        if (window == Foreground) ToFront(window); // as the port does: where Windows is about to put it
         b.Bounds = bounds;
         b.IsVisible = true;
         _zOrder.Remove(b);
