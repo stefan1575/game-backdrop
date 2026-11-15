@@ -27,9 +27,7 @@ public sealed class Win32WindowSystemTests : IDisposable
         _windows = new Win32WindowSystem();
         _windows.WindowEvent += _events.Add;
 
-        var exe = typeof(Win32WindowSystemTests).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
-            .Single(a => a.Key == "TestWindowExe").Value!;
-        _testWindow = Process.Start(new ProcessStartInfo(exe, "--size 800x600") { UseShellExecute = false })!;
+        _testWindow = StartTestWindow("--size 800x600");
         _hwnd = WaitFor(() => TestWindowOf(_testWindow.Id), "the test window to open");
     }
 
@@ -89,6 +87,40 @@ public sealed class Win32WindowSystemTests : IDisposable
         Assert.Null(_windows.Describe(handle));
     }
 
+    [Fact]
+    public void Catching_up_takes_in_destructions_queued_behind_a_posted_message()
+    {
+        // The tray app's thread nearly always has posted messages waiting (WinForms posts its
+        // own): every destruction queued behind one must still be taken in by a single CatchUp,
+        // and the posted message left for the loop.
+        using var second = StartTestWindow("--size 640x480");
+        var secondHwnd = WaitFor(() => TestWindowOf(second.Id), "the second test window to open");
+        var first = new WindowHandle(_hwnd);
+        var other = new WindowHandle(secondHwnd);
+        var firstLifetime = _windows.Describe(first)!.Lifetime;
+        var otherLifetime = _windows.Describe(other)!.Lifetime;
+        Assert.True(PostThreadMessage(GetCurrentThreadId(), WM_APP_PROBE, 0, 0));
+
+        _testWindow.Kill();
+        second.Kill();
+        _testWindow.WaitForExit();
+        second.WaitForExit();
+        WaitFor(() => IsWindow(_hwnd) || IsWindow(secondHwnd) ? 0 : 1, "both windows to be destroyed");
+        Thread.Sleep(200);
+        _windows.CatchUp();
+
+        Assert.Contains(new WindowEvent(WindowEventKind.Destroyed, first, firstLifetime), _events);
+        Assert.Contains(new WindowEvent(WindowEventKind.Destroyed, other, otherLifetime), _events);
+        Assert.True(PeekMessage(out _, 0, WM_APP_PROBE, WM_APP_PROBE, PM_REMOVE), "the posted message is still queued");
+    }
+
+    private static Process StartTestWindow(string arguments)
+    {
+        var exe = typeof(Win32WindowSystemTests).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
+            .Single(a => a.Key == "TestWindowExe").Value!;
+        return Process.Start(new ProcessStartInfo(exe, arguments) { UseShellExecute = false })!;
+    }
+
     private static nint WaitFor(Func<nint> probe, string what)
     {
         var clock = Stopwatch.StartNew();
@@ -121,6 +153,12 @@ public sealed class Win32WindowSystemTests : IDisposable
     }
 
     private const int SW_MINIMIZE = 6, SW_RESTORE = 9;
+    private const uint WM_APP_PROBE = 0x8000 + 1, PM_REMOVE = 1;
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MSG { public nint hwnd; public uint message; public nint wParam, lParam; public uint time; public int x, y; public uint priv; }
+    [DllImport("user32.dll")] private static extern bool PostThreadMessage(uint threadId, uint msg, nint wParam, nint lParam);
+    [DllImport("user32.dll")] private static extern bool PeekMessage(out MSG msg, nint hwnd, uint min, uint max, uint remove);
+    [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
     private delegate bool EnumWindowsProc(nint hwnd, nint lParam);
     [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsProc proc, nint lParam);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(nint hwnd, out uint processId);

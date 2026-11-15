@@ -33,6 +33,10 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
     private readonly Dictionary<nint, long> _lifetimes = [];
     private long _nextLifetime = 1;
 
+    // A message nobody ever posts (registered for this alone): CatchUp's PeekMessage filters on
+    // it, so it never stops at a posted message.
+    private static readonly uint NeverPosted = RegisterWindowMessage("GameBackdrop.CatchUp.NeverPosted");
+
     public Win32WindowSystem()
     {
         _context = SynchronizationContext.Current
@@ -124,10 +128,12 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
     public void CatchUp()
     {
         // Out-of-context WinEvents are queued to this thread and delivered while it checks its
-        // queue. Peeking without removing delivers the pending ones (OnWinEvent runs, dropping the
-        // lifetimes of destroyed windows) and leaves posted messages, including the events it
-        // posts, for the message loop.
-        PeekMessage(out _, 0, 0, 0, PM_NOREMOVE);
+        // queue, after posted messages: an unfiltered PeekMessage stops at the first posted
+        // message (WinForms nearly always has one waiting) before reaching them. Filtering on a
+        // message that is never posted makes it pass over the posted ones, deliver the pending
+        // WinEvents (OnWinEvent runs, dropping destroyed windows' lifetimes) and remove nothing.
+        // Nothing is dispatched, so the controller never runs from inside this call.
+        PeekMessage(out _, 0, NeverPosted, NeverPosted, PM_NOREMOVE);
     }
 
     public void Dispose()
