@@ -210,9 +210,9 @@ public sealed class Win32WindowSystemTests : IDisposable
         // window ordered there topmost too. Here two test windows are topmost, the target above
         // the other. The backdrop is 16x16, at the target's corner, to keep this unobtrusive.
         // The foreground goes to the target, or else to the other topmost window (where Windows
-        // would honour a raise of the backdrop over the ordinary windows). No input is sent to get
-        // it: the test asks (SetForegroundWindow, and the last window started often gets it
-        // anyway), and when Windows refuses there is nothing to check.
+        // would honour a raise of the backdrop over the ordinary windows). It is taken the way the
+        // other foreground tests take it (TryMakeForeground); when Windows still refuses there is
+        // nothing to check.
         using var firstProcess = StartTestWindow("--size 320x240");
         var first = WaitFor(() => TestWindowOf(firstProcess.Id), "the first topmost window to open");
         using var lastProcess = StartTestWindow("--size 320x240");
@@ -224,7 +224,7 @@ public sealed class Win32WindowSystemTests : IDisposable
             Assert.True(SetWindowPos(target, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE));
             Assert.True(IsTopmost(target) && IsTopmost(anchor), "both test windows are topmost");
             Assert.True(ZIndex(target) < ZIndex(anchor), "the target is above the other topmost window");
-            SetForegroundWindow(targetIsForeground ? target : anchor);
+            TryMakeForeground(targetIsForeground ? target : anchor);
             Thread.Sleep(200);
             if ((GetForegroundWindow() == target) != targetIsForeground)
             {

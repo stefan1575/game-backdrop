@@ -165,14 +165,18 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
         if (foreground)
             SetWindowPos(behind.Value, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
         // A window ordered directly behind a topmost one becomes topmost itself (it is then above
-        // any topmost window below that one), so behind a topmost game the backdrop stays among
-        // the ordinary windows: at their top while the game is the foreground (HWND_TOP, right
-        // below every topmost window), else where it is (HWND_NOTOPMOST leaves a window that
-        // isn't topmost in place), so it never covers the ordinary window the user switched to.
-        var insertAfter = !IsTopmost(behind.Value) ? behind.Value : foreground ? HWND_TOP : HWND_NOTOPMOST;
+        // any topmost window below that one), so behind a topmost game the backdrop must end up
+        // among the ordinary windows. While the game is the foreground it goes to their top: it is
+        // ordered behind the game, then demoted below (HWND_NOTOPMOST puts a topmost window right
+        // below every topmost window). HWND_TOP can't do this: Windows ignores it from a process
+        // that isn't the foreground, as this app isn't. Otherwise it stays where it is
+        // (HWND_NOTOPMOST leaves a window that isn't topmost in place), so it never covers the
+        // ordinary window the user switched to.
+        var insertAfter = !IsTopmost(behind.Value) || foreground ? behind.Value : HWND_NOTOPMOST;
         SetWindowPos(backdrop.Value, insertAfter, bounds.Left, bounds.Top, bounds.Width, bounds.Height,
             SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOOWNERZORDER);
-        // A guard for a game that turns topmost between the check and the call.
+        // Demote a backdrop that is topmost now: ordered behind a topmost game in front, or behind
+        // a game that turned topmost between the check and the call.
         if (IsTopmost(backdrop.Value))
             SetWindowPos(backdrop.Value, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
     }
