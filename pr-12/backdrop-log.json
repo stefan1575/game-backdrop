@@ -1,0 +1,410 @@
+[
+  {
+    "name": "b01-before",
+    "scene": "1. Windowed 800x600 test window, app not running",
+    "style": "0x14CF0000",
+    "ex": "0x00000100",
+    "outer": "(100,100) 816x639",
+    "client": "(108,131) 800x600"
+  },
+  {
+    "game": {
+      "style": "0x14CF0000",
+      "ex": "0x00000100",
+      "outer": "(100,100) 816x639",
+      "client": "(108,131) 800x600",
+      "visible": true,
+      "minimised": false
+    },
+    "backdrops": [],
+    "firstVisibleBelowGame": "other window (class Chrome_WidgetWin_1)",
+    "firstVisibleBelowGameInfo": {
+      "cls": "Chrome_WidgetWin_1",
+      "process": "T3 Code (Beta)",
+      "rect": "(-8,-8) 2576x1408",
+      "ex": "0x00200100",
+      "topmost": false,
+      "layered": false,
+      "transparent": false,
+      "belowGame": true
+    },
+    "backdropDirectlyBehindGame": false,
+    "foreground": "game",
+    "taskbar": "no backdrop",
+    "name": "b01-before",
+    "scene": "1. App not running",
+    "picture": "b01-before.png: PrintWindow on an outline of the monitor"
+  },
+  {
+    "game": {
+      "style": "0x14020000",
+      "ex": "0x00000000",
+      "outer": "(880,420) 800x600",
+      "client": "(880,420) 800x600",
+      "visible": true,
+      "minimised": false
+    },
+    "backdrops": [
+      {
+        "rect": "(0,0) 2560x1440",
+        "visible": true,
+        "ex": "0x08000080",
+        "noActivate": true,
+        "toolWindow": true,
+        "topmost": false
+      }
+    ],
+    "firstVisibleBelowGame": "backdrop",
+    "firstVisibleBelowGameInfo": null,
+    "backdropDirectlyBehindGame": true,
+    "foreground": "game",
+    "taskbar": "below the backdrop",
+    "name": "b02-restyled",
+    "scene": "2. App started: game centred, rest of the monitor black, taskbar behind",
+    "activatedByHarness": "no (already foreground)",
+    "blackShareTaskbarStrip": "100.00% of 122880 px",
+    "blackShareOutsideGame": "100.00% of 3206400 px",
+    "blackShareOutsideGameArea": "monitor minus the game\u0027s outer rect",
+    "picture": "b02-restyled.png: screen capture (CopyFromScreen) while the backdrop covers the monitor",
+    "maskedOtherWindows": []
+  },
+  {
+    "game": {
+      "style": "0x14020000",
+      "ex": "0x00000000",
+      "outer": "(880,420) 800x600",
+      "client": "(880,420) 800x600",
+      "visible": true,
+      "minimised": false
+    },
+    "backdrops": [
+      {
+        "rect": "(0,0) 2560x1440",
+        "visible": true,
+        "ex": "0x08000080",
+        "noActivate": true,
+        "toolWindow": true,
+        "topmost": false
+      }
+    ],
+    "firstVisibleBelowGame": "backdrop",
+    "firstVisibleBelowGameInfo": null,
+    "backdropDirectlyBehindGame": true,
+    "foreground": "Another app",
+    "taskbar": "above the backdrop",
+    "anotherAppAboveGame": true,
+    "name": "b03-other-app",
+    "scene": "3. Another app in front: above the game, the game above the backdrop",
+    "activatedByHarness": "no (already foreground)",
+    "blackShareTaskbarStrip": "0.16% of 122880 px",
+    "blackShareOutsideGame": "95.86% of 2966400 px",
+    "blackShareOutsideGameArea": "monitor minus the game\u0027s outer rect and the Another app window\u0027s rect",
+    "picture": "b03-other-app.png: screen capture (CopyFromScreen) while the backdrop covers the monitor; taskbar strip masked",
+    "maskedOtherWindows": []
+  },
+  {
+    "game": {
+      "style": "0x14020000",
+      "ex": "0x00000000",
+      "outer": "(880,420) 800x600",
+      "client": "(880,420) 800x600",
+      "visible": true,
+      "minimised": false
+    },
+    "backdrops": [
+      {
+        "rect": "(0,0) 2560x1440",
+        "visible": true,
+        "ex": "0x08000080",
+        "noActivate": true,
+        "toolWindow": true,
+        "topmost": false
+      }
+    ],
+    "firstVisibleBelowGame": "backdrop",
+    "firstVisibleBelowGameInfo": null,
+    "backdropDirectlyBehindGame": true,
+    "foreground": "game",
+    "taskbar": "below the backdrop",
+    "anotherAppAboveGame": false,
+    "name": "b04-click-black",
+    "scene": "4. Real click on the black at (2400,100): focus back to the game",
+    "activatedByHarness": "no (SendInput click only)",
+    "note": "cursor put back at (1242,1293)",
+    "blackShareTaskbarStrip": "100.00% of 122880 px",
+    "blackShareOutsideGame": "100.00% of 2966400 px",
+    "blackShareOutsideGameArea": "monitor minus the game\u0027s outer rect and the Another app window\u0027s rect",
+    "picture": "b04-click-black.png: screen capture (CopyFromScreen) while the backdrop covers the monitor",
+    "maskedOtherWindows": []
+  },
+  {
+    "game": {
+      "style": "0x34020000",
+      "ex": "0x00000000",
+      "outer": "(-32000,-32000) 160x28",
+      "client": "(-32000,-32000) 0x0",
+      "visible": true,
+      "minimised": true
+    },
+    "backdrops": [
+      {
+        "rect": "(0,0) 2560x1440",
+        "visible": false,
+        "ex": "0x08000080",
+        "noActivate": true,
+        "toolWindow": true,
+        "topmost": false
+      }
+    ],
+    "firstVisibleBelowGame": "other window (class Progman)",
+    "firstVisibleBelowGameInfo": {
+      "cls": "Progman",
+      "process": "explorer",
+      "rect": "(0,0) 2560x1440",
+      "ex": "0x00200080",
+      "topmost": false,
+      "layered": false,
+      "transparent": false,
+      "belowGame": true
+    },
+    "backdropDirectlyBehindGame": false,
+    "foreground": "Another app",
+    "taskbar": "above the backdrop",
+    "anotherAppAboveGame": true,
+    "name": "b05-minimised",
+    "scene": "5. Game minimised (SW_MINIMIZE)",
+    "picture": "log only (backdrop hidden: no screen capture)"
+  },
+  {
+    "game": {
+      "style": "0x14020000",
+      "ex": "0x00000000",
+      "outer": "(880,420) 800x600",
+      "client": "(880,420) 800x600",
+      "visible": true,
+      "minimised": false
+    },
+    "backdrops": [
+      {
+        "rect": "(0,0) 2560x1440",
+        "visible": true,
+        "ex": "0x08000080",
+        "noActivate": true,
+        "toolWindow": true,
+        "topmost": false
+      }
+    ],
+    "firstVisibleBelowGame": "backdrop",
+    "firstVisibleBelowGameInfo": null,
+    "backdropDirectlyBehindGame": true,
+    "foreground": "game",
+    "taskbar": "below the backdrop",
+    "anotherAppAboveGame": false,
+    "name": "b06-restored",
+    "scene": "6. Game restored (SW_RESTORE): backdrop back, directly behind it",
+    "activatedByHarness": "no (already foreground)",
+    "blackShareTaskbarStrip": "100.00% of 122880 px",
+    "blackShareOutsideGame": "100.00% of 2966400 px",
+    "blackShareOutsideGameArea": "monitor minus the game\u0027s outer rect and the Another app window\u0027s rect",
+    "picture": "b06-restored.png: screen capture (CopyFromScreen) while the backdrop covers the monitor",
+    "maskedOtherWindows": []
+  },
+  {
+    "game": {
+      "style": "0x04020000",
+      "ex": "0x00000000",
+      "outer": "(880,420) 800x600",
+      "client": "(880,420) 800x600",
+      "visible": false,
+      "minimised": false
+    },
+    "backdrops": [
+      {
+        "rect": "(0,0) 2560x1440",
+        "visible": false,
+        "ex": "0x08000080",
+        "noActivate": true,
+        "toolWindow": true,
+        "topmost": false
+      }
+    ],
+    "firstVisibleBelowGame": "Another app",
+    "firstVisibleBelowGameInfo": {
+      "cls": "WindowsForms10.Window.8.app.0.5c39d4_r3_ad1",
+      "process": "Evidence",
+      "rect": "(100,100) 600x400",
+      "ex": "0x00050100",
+      "topmost": false,
+      "layered": false,
+      "transparent": false,
+      "belowGame": true
+    },
+    "backdropDirectlyBehindGame": false,
+    "foreground": "game",
+    "taskbar": "above the backdrop",
+    "anotherAppAboveGame": false,
+    "name": "b07a-hidden",
+    "scene": "7a. Game hidden (SW_HIDE)",
+    "picture": "log only (backdrop hidden: no screen capture)"
+  },
+  {
+    "game": {
+      "style": "0x14020000",
+      "ex": "0x00000000",
+      "outer": "(880,420) 800x600",
+      "client": "(880,420) 800x600",
+      "visible": true,
+      "minimised": false
+    },
+    "backdrops": [
+      {
+        "rect": "(0,0) 2560x1440",
+        "visible": true,
+        "ex": "0x08000080",
+        "noActivate": true,
+        "toolWindow": true,
+        "topmost": false
+      }
+    ],
+    "firstVisibleBelowGame": "backdrop",
+    "firstVisibleBelowGameInfo": null,
+    "backdropDirectlyBehindGame": true,
+    "foreground": "game",
+    "taskbar": "below the backdrop",
+    "anotherAppAboveGame": false,
+    "name": "b07b-shown",
+    "scene": "7b. Game shown again (SW_SHOW): backdrop back, directly behind it",
+    "activatedByHarness": "no (already foreground)",
+    "blackShareTaskbarStrip": "100.00% of 122880 px",
+    "blackShareOutsideGame": "100.00% of 2966400 px",
+    "blackShareOutsideGameArea": "monitor minus the game\u0027s outer rect and the Another app window\u0027s rect",
+    "picture": "b07b-shown.png: screen capture (CopyFromScreen) while the backdrop covers the monitor",
+    "maskedOtherWindows": []
+  },
+  {
+    "game": {
+      "style": "0x14CF0000",
+      "ex": "0x00000100",
+      "outer": "(100,100) 816x639",
+      "client": "(108,131) 800x600",
+      "visible": true,
+      "minimised": false
+    },
+    "backdrops": [],
+    "firstVisibleBelowGame": "Another app",
+    "firstVisibleBelowGameInfo": {
+      "cls": "WindowsForms10.Window.8.app.0.5c39d4_r3_ad1",
+      "process": "Evidence",
+      "rect": "(100,100) 600x400",
+      "ex": "0x00050100",
+      "topmost": false,
+      "layered": false,
+      "transparent": false,
+      "belowGame": true
+    },
+    "backdropDirectlyBehindGame": false,
+    "foreground": "game",
+    "taskbar": "no backdrop",
+    "anotherAppAboveGame": false,
+    "name": "b08-after-quit",
+    "scene": "8. App quit from its tray menu",
+    "picture": "b08-after-quit.png: PrintWindow on an outline of the monitor",
+    "note": "original style 0x14CF0000 outer (100,100) 816x639 client (108,131) 800x600; now style 0x14CF0000 outer (100,100) 816x639 client (108,131) 800x600; equal: True"
+  },
+  {
+    "name": "b08-after-quit",
+    "scene": "8. App quit from its tray menu: original frame back, no backdrop",
+    "style": "0x14CF0000",
+    "ex": "0x00000100",
+    "outer": "(100,100) 816x639",
+    "client": "(108,131) 800x600"
+  },
+  {
+    "name": "b09-game-exit",
+    "scene": "9. Test window killed while the app runs",
+    "picture": "log only",
+    "backdropsBeforeKill": 1,
+    "backdropsAfter": 0,
+    "msUntilNoBackdrop": 15
+  },
+  {
+    "game": {
+      "style": "0x94000000",
+      "ex": "0x00000000",
+      "outer": "(0,0) 2560x1440",
+      "client": "(0,0) 2560x1440",
+      "visible": true,
+      "minimised": false
+    },
+    "backdrops": [],
+    "firstVisibleBelowGame": "Another app",
+    "firstVisibleBelowGameInfo": {
+      "cls": "WindowsForms10.Window.8.app.0.5c39d4_r3_ad1",
+      "process": "Evidence",
+      "rect": "(100,100) 600x400",
+      "ex": "0x00050100",
+      "topmost": false,
+      "layered": false,
+      "transparent": false,
+      "belowGame": true
+    },
+    "backdropDirectlyBehindGame": false,
+    "foreground": "game",
+    "taskbar": "no backdrop",
+    "anotherAppAboveGame": false,
+    "name": "b10-fullscreen",
+    "scene": "10. Borderless-fullscreen test window opened while the app runs",
+    "picture": "log only",
+    "note": "at open style 0x94000000 outer (0,0) 2560x1440; 1.5 s later style 0x94000000 outer (0,0) 2560x1440; untouched: True"
+  },
+  {
+    "name": "fgprobe2",
+    "when": "r1 restyled while Another app is foreground",
+    "foreground": "Another app",
+    "zGame": 67,
+    "zBackdrop": 68,
+    "zAnotherApp": 64,
+    "belowGame": "backdrop",
+    "taskbarAboveBackdrop": true
+  },
+  {
+    "name": "fgprobe2",
+    "when": "r1 100 ms after activating the game (yes (ALT tap \u002B SetForegroundWindow, attempt 1))",
+    "foreground": "game",
+    "zGame": 55,
+    "zBackdrop": 56,
+    "zAnotherApp": 67,
+    "belowGame": "backdrop",
+    "taskbarAboveBackdrop": false
+  },
+  {
+    "name": "fgprobe2",
+    "when": "r1 1.1 s after activating the game",
+    "foreground": "game",
+    "zGame": 55,
+    "zBackdrop": 56,
+    "zAnotherApp": 67,
+    "belowGame": "backdrop",
+    "taskbarAboveBackdrop": false
+  },
+  {
+    "name": "fgprobe2",
+    "when": "r1 after hide \u002B show \u002B activate (no (already foreground))",
+    "foreground": "game",
+    "zGame": 55,
+    "zBackdrop": 56,
+    "zAnotherApp": 67,
+    "belowGame": "backdrop",
+    "taskbarAboveBackdrop": false
+  },
+  {
+    "name": "fgprobe2",
+    "when": "r1 after hide \u002B show, Another app, then the game again (yes (ALT tap \u002B SetForegroundWindow, attempt 1))",
+    "foreground": "game",
+    "zGame": 55,
+    "zBackdrop": 56,
+    "zAnotherApp": 61,
+    "belowGame": "backdrop",
+    "taskbarAboveBackdrop": false
+  }
+]
