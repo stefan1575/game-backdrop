@@ -149,7 +149,11 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
         var state = TrackedState.Fullscreen;
         if (WindowClassifier.Classify(info.Client, info.Style.HasCaption, info.Monitor.Bounds) == WindowMode.Windowed)
         {
-            var target = new WindowFrame(info.Style.Borderless(), Placement.Centre(info.Client.Size, info.Monitor.Bounds));
+            // The client area keeps its size; whatever non-client part survives the restyle (a
+            // menu bar) is added on, and the whole window is centred.
+            var style = info.Style.Borderless();
+            var outerSize = windows.OuterSizeFor(info.Handle, style, info.Client.Size);
+            var target = new WindowFrame(style, Placement.Centre(outerSize, info.Monitor.Bounds));
             switch (windows.SetFrame(info.Handle, target))
             {
                 case ChangeResult.Ok:

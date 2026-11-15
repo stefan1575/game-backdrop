@@ -66,6 +66,19 @@ public sealed class BackdropControllerTests
     }
 
     [Fact]
+    public void A_game_with_a_menu_bar_keeps_its_client_size_and_is_centred_with_its_menu()
+    {
+        StartController();
+        var outer = Rect.FromPosition(100, 100, new Size(800 + 16, 600 + 31 + FakeWindow.MenuHeight + 8));
+
+        var game = _desktop.Open(_desktop.StartProcess(Novel), FakeWindowSystem.Captioned, outer, menu: true);
+
+        Assert.False(game.HasBorder);
+        Assert.Equal(new Size(800, 600), game.Client.Size);
+        Assert.Equal(Rect.FromPosition(560, 230, new Size(800, 620)), game.Outer);
+    }
+
+    [Fact]
     public void A_game_larger_than_its_monitor_keeps_its_top_left_on_the_monitor()
     {
         StartController();

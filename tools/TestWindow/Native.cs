@@ -21,6 +21,7 @@ internal static class Native
     public const int VK_ESCAPE = 0x1B;
     public const int TRANSPARENT = 1;
     public const int IDC_ARROW = 32512;
+    public const uint MF_STRING = 0x0000;
     public static readonly nint DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4;
 
     public delegate nint WndProc(nint hwnd, uint msg, nint wParam, nint lParam);
@@ -90,6 +91,8 @@ internal static class Native
     public static extern nint CreateWindowEx(uint exStyle, string className, string title, uint style,
         int x, int y, int width, int height, nint parent, nint menu, nint instance, nint param);
 
+    [DllImport("user32.dll")] public static extern nint CreateMenu();
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern bool AppendMenu(nint menu, uint flags, nuint id, string text);
     [DllImport("user32.dll")] public static extern bool ShowWindow(nint hwnd, int cmd);
     [DllImport("user32.dll")] public static extern bool DestroyWindow(nint hwnd);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(nint hwnd);

@@ -76,6 +76,16 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
             new MonitorInfo(new MonitorHandle(monitor), ToRect(monitorInfo.rcMonitor), ToRect(monitorInfo.rcWork)));
     }
 
+    public Size OuterSizeFor(WindowHandle window, WindowStyle style, Size clientSize)
+    {
+        // A top-level window's menu bar isn't a style bit: it stays attached when the caption goes.
+        var hwnd = window.Value;
+        var rect = new RECT { Right = clientSize.Width, Bottom = clientSize.Height };
+        var dpi = GetDpiForWindow(hwnd);
+        if (dpi == 0 || !AdjustWindowRectExForDpi(ref rect, style.Style, GetMenu(hwnd) != 0, style.ExStyle, dpi)) return clientSize;
+        return new Size(rect.Right - rect.Left, rect.Bottom - rect.Top);
+    }
+
     public ChangeResult SetFrame(WindowHandle window, WindowFrame frame)
     {
         var hwnd = window.Value;

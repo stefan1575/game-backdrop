@@ -1,3 +1,5 @@
+using GameBackdrop.Core.Geometry;
+
 namespace GameBackdrop.Core.WindowSystem;
 
 /// <summary>
@@ -16,6 +18,13 @@ public interface IWindowSystem
 
     /// <summary>The window as it is now, or null if it no longer exists.</summary>
     WindowInfo? Describe(WindowHandle window);
+
+    /// <summary>
+    /// The outer size <paramref name="window"/> needs for a client area of <paramref name="clientSize"/>
+    /// once it has <paramref name="style"/>, counting the non-client parts the style doesn't
+    /// control, such as a menu bar.
+    /// </summary>
+    Size OuterSizeFor(WindowHandle window, WindowStyle style, Size clientSize);
 
     /// <summary>Set a window's styles and outer rect in one go, without activating it or changing its Z order.</summary>
     ChangeResult SetFrame(WindowHandle window, WindowFrame frame);

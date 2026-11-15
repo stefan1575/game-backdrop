@@ -96,6 +96,16 @@ internal static class NativeMethods
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool GetClientRect(nint hWnd, out RECT lpRect);
 
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool AdjustWindowRectExForDpi(ref RECT lpRect, uint dwStyle, [MarshalAs(UnmanagedType.Bool)] bool bMenu, uint dwExStyle, uint dpi);
+
+    [DllImport("user32.dll")]
+    public static extern uint GetDpiForWindow(nint hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern nint GetMenu(nint hWnd);
+
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool ClientToScreen(nint hWnd, ref POINT lpPoint);

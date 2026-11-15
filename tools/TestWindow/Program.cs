@@ -7,8 +7,9 @@ namespace TestWindow;
 /// A stand-in game for checking Game Backdrop's real Win32 path without a game. It is a plain
 /// Win32 window (no WinForms, which re-applies its own bounds when another process restyles it),
 /// so it behaves like a typical game window. List this exe in the settings file, then switch it
-/// with keys: W windowed, F borderless fullscreen, R next size, Esc quit.
-/// Usage: <c>TestWindow.exe [--mode windowed|fullscreen] [--size WIDTHxHEIGHT]</c>
+/// with keys: W windowed, F borderless fullscreen, R next size, Esc quit. <c>--menu</c> gives it
+/// a menu bar, like many visual novels have.
+/// Usage: <c>TestWindow.exe [--mode windowed|fullscreen] [--size WIDTHxHEIGHT] [--menu]</c>
 /// </summary>
 internal static class Program
 {
@@ -17,12 +18,14 @@ internal static class Program
     private static (int Width, int Height) _clientSize;
     private static int _nextSize;
     private static nint _brush;
+    private static bool _hasMenu;
 
     [STAThread]
     private static int Main(string[] args)
     {
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         _clientSize = ParseSize(Option(args, "--size")) ?? Sizes[0];
+        _hasMenu = args.Contains("--menu");
         _brush = CreateSolidBrush(0x008B3D48); // dark slate blue (BGR)
 
         var instance = GetModuleHandle(null);
@@ -38,8 +41,14 @@ internal static class Program
         if (RegisterClassEx(ref windowClass) == 0) return 1;
 
         var outer = OuterFor(_clientSize, WS_OVERLAPPEDWINDOW);
+        nint menu = 0;
+        if (_hasMenu)
+        {
+            menu = CreateMenu();
+            AppendMenu(menu, MF_STRING, 1, "&File");
+        }
         var hwnd = CreateWindowEx(0, windowClass.lpszClassName, "Game Backdrop test window", WS_OVERLAPPEDWINDOW,
-            100, 100, outer.Width, outer.Height, 0, 0, instance, 0);
+            100, 100, outer.Width, outer.Height, 0, menu, instance, 0);
         if (hwnd == 0) return 1;
         if (Option(args, "--mode") == "fullscreen") MakeBorderlessFullscreen(hwnd);
         ShowWindow(hwnd, SW_SHOWNORMAL);
@@ -108,7 +117,7 @@ internal static class Program
     private static (int Width, int Height) OuterFor((int Width, int Height) client, uint style)
     {
         var rect = new RECT { Right = client.Width, Bottom = client.Height };
-        AdjustWindowRectExForDpi(ref rect, style, false, 0, GetDpiForSystem());
+        AdjustWindowRectExForDpi(ref rect, style, _hasMenu, 0, GetDpiForSystem());
         return (rect.Right - rect.Left, rect.Bottom - rect.Top);
     }
 
