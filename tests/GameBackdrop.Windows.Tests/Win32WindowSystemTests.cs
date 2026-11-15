@@ -113,6 +113,120 @@ public sealed class Win32WindowSystemTests : IDisposable
         Assert.True(PeekMessage(out _, 0, WM_APP_PROBE, WM_APP_PROBE, PM_REMOVE), "the posted message is still queued");
     }
 
+    [Fact]
+    public void A_backdrop_covers_the_bounds_it_is_given_directly_behind_the_window()
+    {
+        var bounds = _windows.Describe(new WindowHandle(_hwnd))!.Monitor.Bounds;
+        var backdrop = _windows.CreateBackdrop();
+
+        _windows.ShowBackdrop(backdrop, bounds, new WindowHandle(_hwnd));
+
+        var hwnd = backdrop.Value;
+        Assert.True(GetWindowRect(hwnd, out var rect));
+        Assert.Equal(bounds, new Rect(rect.Left, rect.Top, rect.Right, rect.Bottom));
+        Assert.True(IsWindowVisible(hwnd));
+        Assert.Equal(hwnd, NextVisibleBelow(_hwnd));
+        var exStyle = (uint)GetWindowLongPtr(hwnd, GWL_EXSTYLE);
+        Assert.True((exStyle & WS_EX_NOACTIVATE) != 0, "not activated by clicks");
+        Assert.True((exStyle & WS_EX_TOOLWINDOW) != 0, "not in alt-tab or the taskbar");
+        Assert.True((exStyle & WS_EX_TOPMOST) == 0, "never topmost");
+    }
+
+    [Fact]
+    public void Showing_a_backdrop_does_not_take_the_foreground()
+    {
+        var bounds = _windows.Describe(new WindowHandle(_hwnd))!.Monitor.Bounds;
+        var before = GetForegroundWindow();
+
+        _windows.ShowBackdrop(_windows.CreateBackdrop(), bounds, new WindowHandle(_hwnd));
+
+        Assert.Equal(before, GetForegroundWindow());
+    }
+
+    [Fact]
+    public void A_hidden_backdrop_is_not_visible_and_a_destroyed_one_is_gone()
+    {
+        var bounds = _windows.Describe(new WindowHandle(_hwnd))!.Monitor.Bounds;
+        var backdrop = _windows.CreateBackdrop();
+        Assert.False(IsWindowVisible(backdrop.Value), "created hidden");
+        _windows.ShowBackdrop(backdrop, bounds, new WindowHandle(_hwnd));
+
+        _windows.HideBackdrop(backdrop);
+        Assert.True(IsWindow(backdrop.Value));
+        Assert.False(IsWindowVisible(backdrop.Value));
+
+        _windows.DestroyBackdrop(backdrop);
+        Assert.False(IsWindow(backdrop.Value));
+        _windows.DestroyBackdrop(backdrop); // already gone: no-op
+    }
+
+    [Theory]
+    [InlineData(WM_LBUTTONDOWN)]
+    [InlineData(WM_RBUTTONDOWN)]
+    [InlineData(WM_MBUTTONDOWN)]
+    public void A_click_on_a_backdrop_raises_BackdropClicked_and_does_not_activate_it(uint button)
+    {
+        var bounds = _windows.Describe(new WindowHandle(_hwnd))!.Monitor.Bounds;
+        var backdrop = _windows.CreateBackdrop();
+        _windows.ShowBackdrop(backdrop, bounds, new WindowHandle(_hwnd));
+        var clicks = new List<BackdropHandle>();
+        _windows.BackdropClicked += clicks.Add;
+
+        Assert.Equal(MA_NOACTIVATE, SendMessage(backdrop.Value, WM_MOUSEACTIVATE, backdrop.Value, (nint)(HTCLIENT | (button << 16))));
+        Assert.True(PostMessage(backdrop.Value, button, 0, 0));
+        while (PeekMessage(out var msg, backdrop.Value, 0, 0, PM_REMOVE)) DispatchMessage(ref msg);
+
+        Assert.Equal([backdrop], clicks);
+    }
+
+    [Fact]
+    public void Hiding_a_window_raises_Hidden_with_its_lifetime()
+    {
+        var handle = new WindowHandle(_hwnd);
+        var lifetime = _windows.Describe(handle)!.Lifetime;
+
+        ShowWindow(_hwnd, SW_HIDE);
+        WaitFor(() => IsWindowVisible(_hwnd) ? 0 : 1, "the window to hide");
+
+        WaitFor(() =>
+        {
+            _windows.Describe(handle); // takes in the queued window events
+            return _events.Contains(new WindowEvent(WindowEventKind.Hidden, handle, lifetime)) ? 1 : 0;
+        }, "the Hidden event");
+    }
+
+    [Fact]
+    public void Marking_a_window_fullscreen_and_back_succeeds()
+    {
+        // xUnit 2 has no runtime skip: with no shell taskbar (a CI runner without Explorer) there
+        // is nothing to tell, so the test passes without checking.
+        if (FindWindow("Shell_TrayWnd", null) == 0) return;
+        var handle = new WindowHandle(_hwnd);
+
+        Assert.Equal(ChangeResult.Ok, _windows.MarkFullscreen(handle, true));
+        Assert.Equal(ChangeResult.Ok, _windows.MarkFullscreen(handle, false));
+    }
+
+    [Fact]
+    public void Marking_or_activating_a_window_that_is_gone_says_so()
+    {
+        var handle = new WindowHandle(_hwnd);
+        _testWindow.Kill();
+        _testWindow.WaitForExit();
+        WaitFor(() => IsWindow(_hwnd) ? 0 : 1, "the window to be destroyed");
+
+        Assert.Equal(ChangeResult.WindowGone, _windows.MarkFullscreen(handle, true));
+        Assert.Equal(ChangeResult.WindowGone, _windows.Activate(handle));
+    }
+
+    /// <summary>The first visible window below <paramref name="hwnd"/> in the Z order.</summary>
+    private static nint NextVisibleBelow(nint hwnd)
+    {
+        for (var next = GetWindow(hwnd, GW_HWNDNEXT); next != 0; next = GetWindow(next, GW_HWNDNEXT))
+            if (IsWindowVisible(next)) return next;
+        return 0;
+    }
+
     private static Process StartTestWindow(string arguments)
     {
         var exe = typeof(Win32WindowSystemTests).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
@@ -151,7 +265,23 @@ public sealed class Win32WindowSystemTests : IDisposable
         public override void Post(SendOrPostCallback d, object? state) => d(state);
     }
 
-    private const int SW_MINIMIZE = 6, SW_RESTORE = 9;
+    private const int SW_HIDE = 0, SW_MINIMIZE = 6, SW_RESTORE = 9;
+    private const int GWL_EXSTYLE = -20;
+    private const uint GW_HWNDNEXT = 2;
+    private const uint WS_EX_TOPMOST = 0x8, WS_EX_TOOLWINDOW = 0x80, WS_EX_NOACTIVATE = 0x08000000;
+    private const uint WM_MOUSEACTIVATE = 0x0021, WM_LBUTTONDOWN = 0x0201, WM_RBUTTONDOWN = 0x0204, WM_MBUTTONDOWN = 0x0207;
+    private const uint HTCLIENT = 1;
+    private const nint MA_NOACTIVATE = 3;
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RECT { public int Left, Top, Right, Bottom; }
+    [DllImport("user32.dll")] private static extern bool GetWindowRect(nint hwnd, out RECT rect);
+    [DllImport("user32.dll")] private static extern nint GetWindow(nint hwnd, uint command);
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern nint GetWindowLongPtr(nint hwnd, int index);
+    [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint FindWindow(string className, string? windowName);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint SendMessage(nint hwnd, uint msg, nint wParam, nint lParam);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern bool PostMessage(nint hwnd, uint msg, nint wParam, nint lParam);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint DispatchMessage(ref MSG msg);
     private const uint WM_APP_PROBE = 0x8000 + 1, PM_REMOVE = 1;
     [StructLayout(LayoutKind.Sequential)]
     private struct MSG { public nint hwnd; public uint message; public nint wParam, lParam; public uint time; public int x, y; public uint priv; }

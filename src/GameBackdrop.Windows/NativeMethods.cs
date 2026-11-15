@@ -6,7 +6,7 @@ namespace GameBackdrop.Windows;
 /// <summary>
 /// The Win32 functions the window system uses. Every call acts on a window handle, except
 /// reading a process's exe path, which opens it with PROCESS_QUERY_LIMITED_INFORMATION only
-/// (no memory access).
+/// (no memory access), and the backdrop's window class and windows, which are this process's own.
 /// </summary>
 internal static class NativeMethods
 {
@@ -18,20 +18,34 @@ internal static class NativeMethods
     public const uint SWP_NOZORDER = 0x0004;
     public const uint SWP_NOACTIVATE = 0x0010;
     public const uint SWP_FRAMECHANGED = 0x0020;
+    public const uint SWP_SHOWWINDOW = 0x0040;
     public const uint SWP_NOOWNERZORDER = 0x0200;
 
     public const uint GW_OWNER = 4;
     public const uint GA_ROOT = 2;
     public const uint MONITOR_DEFAULTTONEAREST = 2;
     public const uint PM_NOREMOVE = 0x0000;
+    public const int SW_HIDE = 0;
     public const int SW_SHOWMINNOACTIVE = 7;
     public const uint WS_EX_TOOLWINDOW = 0x00000080;
+    public const uint WS_EX_NOACTIVATE = 0x08000000;
+    public const uint WS_POPUP = 0x80000000;
+
+    public const uint WM_MOUSEACTIVATE = 0x0021;
+    public const uint WM_LBUTTONDOWN = 0x0201;
+    public const uint WM_RBUTTONDOWN = 0x0204;
+    public const uint WM_MBUTTONDOWN = 0x0207;
+    public const int MA_NOACTIVATE = 3;
+    public const int BLACK_BRUSH = 4;
+    public const int IDC_ARROW = 32512;
+    public const int ERROR_CLASS_ALREADY_EXISTS = 1410;
 
     public const uint EVENT_SYSTEM_FOREGROUND = 0x0003;
     public const uint EVENT_SYSTEM_MINIMIZESTART = 0x0016;
     public const uint EVENT_SYSTEM_MINIMIZEEND = 0x0017;
     public const uint EVENT_OBJECT_DESTROY = 0x8001;
     public const uint EVENT_OBJECT_SHOW = 0x8002;
+    public const uint EVENT_OBJECT_HIDE = 0x8003;
     public const uint EVENT_OBJECT_LOCATIONCHANGE = 0x800B;
     public const uint WINEVENT_OUTOFCONTEXT = 0x0000;
     public const uint WINEVENT_SKIPOWNPROCESS = 0x0002;
@@ -84,6 +98,25 @@ internal static class NativeMethods
         public RECT rcWork;
         public uint dwFlags;
     }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct WNDCLASSEX
+    {
+        public int cbSize;
+        public uint style;
+        public nint lpfnWndProc;
+        public int cbClsExtra;
+        public int cbWndExtra;
+        public nint hInstance;
+        public nint hIcon;
+        public nint hCursor;
+        public nint hbrBackground;
+        public string? lpszMenuName;
+        public string lpszClassName;
+        public nint hIconSm;
+    }
+
+    public delegate nint WndProc(nint hWnd, uint msg, nint wParam, nint lParam);
 
     public delegate bool EnumWindowsProc(nint hWnd, nint lParam);
 
@@ -178,6 +211,36 @@ internal static class NativeMethods
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool UnhookWinEvent(nint hWinEventHook);
 
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode, EntryPoint = "RegisterClassExW")]
+    public static extern ushort RegisterClassEx(ref WNDCLASSEX lpwcx);
+
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode, EntryPoint = "CreateWindowExW")]
+    public static extern nint CreateWindowEx(uint dwExStyle, string lpClassName, string? lpWindowName, uint dwStyle, int x, int y, int nWidth, int nHeight, nint hWndParent, nint hMenu, nint hInstance, nint lpParam);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool DestroyWindow(nint hWnd);
+
+    [DllImport("user32.dll", EntryPoint = "DefWindowProcW")]
+    public static extern nint DefWindowProc(nint hWnd, uint msg, nint wParam, nint lParam);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool ShowWindow(nint hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool SetForegroundWindow(nint hWnd);
+
+    [DllImport("user32.dll", EntryPoint = "LoadCursorW")]
+    public static extern nint LoadCursor(nint hInstance, nint lpCursorName);
+
+    [DllImport("gdi32.dll")]
+    public static extern nint GetStockObject(int i);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetModuleHandleW")]
+    public static extern nint GetModuleHandle(string? lpModuleName);
+
     [DllImport("kernel32.dll", SetLastError = true)]
     public static extern nint OpenProcess(uint dwDesiredAccess, [MarshalAs(UnmanagedType.Bool)] bool bInheritHandle, uint dwProcessId);
 
@@ -188,4 +251,20 @@ internal static class NativeMethods
     [DllImport("kernel32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool CloseHandle(nint hObject);
+}
+
+/// <summary>The shell's taskbar list (CLSID_TaskbarList).</summary>
+[ComImport, Guid("56FDF344-FD6D-11d0-958A-006097C9A090")]
+internal class TaskbarList;
+
+/// <summary>ITaskbarList2. Only HrInit and MarkFullscreenWindow are called; the rest keep the vtable order.</summary>
+[ComImport, Guid("602D4995-B13A-429b-A66E-1935E44F4317"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface ITaskbarList2
+{
+    void HrInit();
+    void AddTab(nint hwnd);
+    void DeleteTab(nint hwnd);
+    void ActivateTab(nint hwnd);
+    void SetActiveAlt(nint hwnd);
+    void MarkFullscreenWindow(nint hwnd, [MarshalAs(UnmanagedType.Bool)] bool fFullscreen);
 }

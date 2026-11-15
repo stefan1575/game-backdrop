@@ -13,6 +13,12 @@ public interface IWindowSystem
     /// <summary>Window events for every top-level window on the desktop.</summary>
     event Action<WindowEvent>? WindowEvent;
 
+    /// <summary>
+    /// A mouse button went down on a backdrop. Posted like <see cref="WindowEvent"/>, never raised
+    /// from inside one of these calls.
+    /// </summary>
+    event Action<BackdropHandle>? BackdropClicked;
+
     /// <summary>All top-level windows, visible or not, in Z order.</summary>
     IReadOnlyList<WindowHandle> TopLevelWindows();
 
@@ -38,4 +44,37 @@ public interface IWindowSystem
     /// stays minimised.
     /// </summary>
     ChangeResult SetFrame(WindowHandle window, WindowFrame frame);
+
+    /// <summary>
+    /// A black backdrop window in the app's own process, created hidden. It never activates, and
+    /// it is in neither alt-tab nor the taskbar.
+    /// </summary>
+    BackdropHandle CreateBackdrop();
+
+    /// <summary>
+    /// Cover <paramref name="bounds"/> exactly (a monitor's full bounds, taskbar area included)
+    /// and show the backdrop without activating it, ordered directly behind
+    /// <paramref name="behind"/> in the Z order. It is never topmost.
+    /// </summary>
+    void ShowBackdrop(BackdropHandle backdrop, Rect bounds, WindowHandle behind);
+
+    /// <summary>Hide the backdrop, keeping it for a later <see cref="ShowBackdrop"/>.</summary>
+    void HideBackdrop(BackdropHandle backdrop);
+
+    /// <summary>Destroy the backdrop. Safe on one already destroyed.</summary>
+    void DestroyBackdrop(BackdropHandle backdrop);
+
+    /// <summary>
+    /// Tell the shell the window is (or no longer is) fullscreen, so the taskbar on its monitor
+    /// drops behind it while it is the active window. A shell call on the handle; nothing touches
+    /// the window's process. <see cref="ChangeResult.WindowGone"/> if the handle is no window,
+    /// <see cref="ChangeResult.Failed"/> if the shell call fails.
+    /// </summary>
+    ChangeResult MarkFullscreen(WindowHandle window, bool fullscreen);
+
+    /// <summary>
+    /// Bring the window to the foreground. <see cref="ChangeResult.WindowGone"/> if the handle is
+    /// no window, <see cref="ChangeResult.Failed"/> if Windows refuses.
+    /// </summary>
+    ChangeResult Activate(WindowHandle window);
 }

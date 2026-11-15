@@ -35,6 +35,19 @@ public sealed class FakeWindowSystem : IWindowSystem
 
     public event Action<WindowEvent>? WindowEvent;
 
+    public event Action<BackdropHandle>? BackdropClicked;
+
+    /// <summary>Every backdrop the port has made, destroyed ones included.</summary>
+    public Dictionary<BackdropHandle, FakeBackdrop> Backdrops { get; } = [];
+
+    /// <summary>The windows the shell has been told are fullscreen.</summary>
+    public HashSet<WindowHandle> MarkedFullscreen { get; } = [];
+
+    /// <summary>The window last brought to the foreground with <see cref="Activate"/>.</summary>
+    public WindowHandle? Foreground { get; private set; }
+
+    private nint _nextBackdrop = 0xB000;
+
     /// <summary>Every SetFrame call, in order, including ones that failed.</summary>
     public List<(WindowHandle Window, WindowFrame Frame)> FrameChanges { get; } = [];
 
@@ -160,6 +173,51 @@ public sealed class FakeWindowSystem : IWindowSystem
         return ChangeResult.Ok;
     }
 
+    public BackdropHandle CreateBackdrop()
+    {
+        var handle = new BackdropHandle(_nextBackdrop++);
+        Backdrops[handle] = new FakeBackdrop();
+        return handle;
+    }
+
+    public void ShowBackdrop(BackdropHandle backdrop, Rect bounds, WindowHandle behind)
+    {
+        if (!Backdrops.TryGetValue(backdrop, out var b) || b.IsDestroyed) return;
+        b.Bounds = bounds;
+        b.Behind = behind;
+        b.IsVisible = true;
+    }
+
+    public void HideBackdrop(BackdropHandle backdrop)
+    {
+        if (Backdrops.TryGetValue(backdrop, out var b)) b.IsVisible = false;
+    }
+
+    public void DestroyBackdrop(BackdropHandle backdrop)
+    {
+        if (!Backdrops.TryGetValue(backdrop, out var b)) return;
+        b.IsVisible = false;
+        b.IsDestroyed = true;
+    }
+
+    public ChangeResult MarkFullscreen(WindowHandle window, bool fullscreen)
+    {
+        if (Find(window) is null) return ChangeResult.WindowGone;
+        if (fullscreen) MarkedFullscreen.Add(window);
+        else MarkedFullscreen.Remove(window);
+        return ChangeResult.Ok;
+    }
+
+    public ChangeResult Activate(WindowHandle window)
+    {
+        if (Find(window) is null) return ChangeResult.WindowGone;
+        Foreground = window;
+        return ChangeResult.Ok;
+    }
+
+    /// <summary>The user clicks the black of a backdrop.</summary>
+    public void ClickBackdrop(BackdropHandle backdrop) => BackdropClicked?.Invoke(backdrop);
+
     /// <summary>The next SetFrame calls on <paramref name="window"/> return these results instead of succeeding.</summary>
     public void FailNextChanges(FakeWindow window, params ChangeResult[] results)
     {
@@ -175,6 +233,16 @@ public sealed class FakeWindowSystem : IWindowSystem
         return _monitors.FirstOrDefault(m => x >= m.Bounds.Left && x < m.Bounds.Right && y >= m.Bounds.Top && y < m.Bounds.Bottom)
             ?? _monitors[0];
     }
+}
+
+/// <summary>A backdrop as the fake port last left it.</summary>
+public sealed class FakeBackdrop
+{
+    public Rect Bounds { get; set; }
+    public bool IsVisible { get; set; }
+    /// <summary>The window it was last shown directly behind.</summary>
+    public WindowHandle? Behind { get; set; }
+    public bool IsDestroyed { get; set; }
 }
 
 public sealed record FakeProcess(FakeWindowSystem System, int Id, string ExePath, bool Elevated);
