@@ -3,6 +3,9 @@ using GameBackdrop.Core.WindowSystem;
 
 namespace GameBackdrop.Core.Tests;
 
+/// <summary>The port calls a test can script something into (<see cref="FakeWindowSystem.DuringNext"/>, <see cref="FakeWindowSystem.ThrowOnNext"/>).</summary>
+public enum PortCall { SetFrame, CreateBackdrop, ShowBackdrop, MarkFullscreen }
+
 /// <summary>
 /// A scripted desktop: monitors, windows with styles and rects, one Z order (windows and
 /// backdrops), a foreground window, and the events they raise. Tests act on it the way a user or a
@@ -269,6 +272,14 @@ public sealed class FakeWindowSystem : IWindowSystem
 
     public ChangeResult SetFrame(WindowHandle handle, WindowFrame frame)
     {
+        Begin(PortCall.SetFrame);
+        var result = ApplyFrame(handle, frame);
+        End(PortCall.SetFrame);
+        return result;
+    }
+
+    private ChangeResult ApplyFrame(WindowHandle handle, WindowFrame frame)
+    {
         FrameChanges.Add((handle, frame));
         var w = Find(handle);
         if (w is null) return ChangeResult.WindowGone;
@@ -287,14 +298,23 @@ public sealed class FakeWindowSystem : IWindowSystem
 
     public BackdropHandle CreateBackdrop()
     {
+        Begin(PortCall.CreateBackdrop);
         var handle = new BackdropHandle(_nextBackdrop++);
         var backdrop = new FakeBackdrop(handle);
         Backdrops[handle] = backdrop;
         _zOrder.Insert(0, backdrop);
+        End(PortCall.CreateBackdrop);
         return handle;
     }
 
     public void ShowBackdrop(BackdropHandle backdrop, Rect bounds, WindowHandle behind)
+    {
+        Begin(PortCall.ShowBackdrop);
+        Order(backdrop, bounds, behind);
+        End(PortCall.ShowBackdrop);
+    }
+
+    private void Order(BackdropHandle backdrop, Rect bounds, WindowHandle behind)
     {
         if (!Backdrops.TryGetValue(backdrop, out var b) || b.IsDestroyed) return;
         var window = Find(behind);
@@ -321,6 +341,14 @@ public sealed class FakeWindowSystem : IWindowSystem
 
     public ChangeResult MarkFullscreen(WindowHandle window, bool fullscreen)
     {
+        Begin(PortCall.MarkFullscreen);
+        var result = Mark(window, fullscreen);
+        End(PortCall.MarkFullscreen);
+        return result;
+    }
+
+    private ChangeResult Mark(WindowHandle window, bool fullscreen)
+    {
         var w = Find(window);
         if (w is null) return ChangeResult.WindowGone;
         if (w.FailedMarks > 0)
@@ -340,6 +368,45 @@ public sealed class FakeWindowSystem : IWindowSystem
         Foreground = w;
         _posted.Enqueue((WindowEventKind.Foreground, w));
         return ChangeResult.Ok;
+    }
+
+    // What tests scripted into the next call of each kind.
+    private readonly HashSet<PortCall> _throwNext = [];
+    private readonly Dictionary<PortCall, Action> _duringNext = [];
+
+    /// <summary>
+    /// Run <paramref name="action"/> inside the next <paramref name="call"/>, after the call has
+    /// done its work and before it returns: the desktop changes while the port is busy (a game
+    /// closes and its handle goes to another window, <see cref="ReplaceUnderItsHandle"/>).
+    /// Whatever it does raises no event from inside the call.
+    /// </summary>
+    public void DuringNext(PortCall call, Action action) => _duringNext[call] = action;
+
+    /// <summary>The next <paramref name="call"/> throws before doing anything, as the port's CreateWindowEx failure does.</summary>
+    public void ThrowOnNext(PortCall call) => _throwNext.Add(call);
+
+    private void Begin(PortCall call)
+    {
+        if (_throwNext.Remove(call)) throw new InvalidOperationException($"{call} failed (scripted).");
+    }
+
+    private void End(PortCall call)
+    {
+        if (_duringNext.Remove(call, out var action)) action();
+    }
+
+    /// <summary>
+    /// <paramref name="gone"/> is destroyed and a new, visible window gets its handle at once,
+    /// with both windows' events still pending (raise them later, if at all). It is marked
+    /// fullscreen of its own accord if <paramref name="markedFullscreen"/>.
+    /// </summary>
+    public FakeWindow ReplaceUnderItsHandle(FakeWindow gone, FakeProcess process, WindowStyle style, Rect outer, bool markedFullscreen = false)
+    {
+        CloseWithEventPending(gone);
+        var replacement = OpenWithReusedHandle(gone, process, style, outer, show: false);
+        replacement.IsVisible = true;
+        replacement.IsMarkedFullscreen = markedFullscreen;
+        return replacement;
     }
 
     /// <summary>The user clicks the black of a backdrop.</summary>

@@ -226,46 +226,60 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
     {
         var tracked = new TrackedWindow(info.Handle, info.ProcessId, info.ProcessPath, game, TrackedState.Fullscreen,
             info.Lifetime, info.Frame, info.Style.HasCaption, info.Client.Size, info.Monitor);
-        if (WindowClassifier.Classify(info.Client, info.Style.HasCaption, info.Monitor.Bounds) == WindowMode.Windowed)
+        if (WindowClassifier.Classify(info.Client, info.Style.HasCaption, info.Monitor.Bounds) != WindowMode.Windowed)
         {
-            // The client area keeps its size; whatever non-client part survives the restyle (a
-            // menu bar) is added on, and the whole window is centred.
-            var style = info.Style.Borderless();
-            var outerSize = windows.OuterSizeFor(info.Handle, style, info.Client.Size);
-            var result = windows.SetFrame(info.Handle, new WindowFrame(style, Placement.Centre(outerSize, info.Monitor.Bounds)));
-            switch (result)
-            {
-                case ChangeResult.Ok:
-                case ChangeResult.PartlyChanged:
-                    // A half-changed window still has to be put back.
-                    var after = windows.Describe(info.Handle);
-                    if (!IsStillTheSameWindow(info.Lifetime, after)) return; // gone already: nothing to put back
-                    if (result == ChangeResult.Ok && after.Client.Size != info.Client.Size)
-                        CorrectClientSize(info, style, outerSize, after);
-                    tracked = WithBackdrop(tracked with { State = TrackedState.Restyled, Monitor = after.Monitor }, after);
-                    break;
-                case ChangeResult.AccessDenied:
-                    tracked = tracked with { State = TrackedState.AccessDenied };
-                    break;
-                case ChangeResult.WindowGone:
-                case ChangeResult.Failed:
-                    // Nothing was changed; a later Shown event gets another try.
-                    return;
-            }
+            Save(tracked);
+            return;
         }
 
-        _tracked[info.Handle] = tracked;
+        // The client area keeps its size; whatever non-client part survives the restyle (a
+        // menu bar) is added on, and the whole window is centred.
+        var style = info.Style.Borderless();
+        var outerSize = windows.OuterSizeFor(info.Handle, style, info.Client.Size);
+        var result = windows.SetFrame(info.Handle, new WindowFrame(style, Placement.Centre(outerSize, info.Monitor.Bounds)));
+        switch (result)
+        {
+            case ChangeResult.AccessDenied:
+                Save(tracked with { State = TrackedState.AccessDenied });
+                return;
+            case ChangeResult.WindowGone:
+            case ChangeResult.Failed:
+                // Nothing was changed; a later Shown event gets another try.
+                return;
+        }
+
+        // Changed, or half-changed, so it has to be put back: the record is kept from here on,
+        // and brought up to date after each step, so that if a later step throws, the crash
+        // handler's Stop still puts the window back and destroys whatever backdrop was made.
+        tracked = Save(tracked with { State = TrackedState.Restyled });
+        var after = windows.Describe(info.Handle);
+        if (!IsStillTheSameWindow(info.Lifetime, after))
+        {
+            Forget(tracked); // gone already: nothing to put back
+            return;
+        }
+        if (result == ChangeResult.Ok && after.Client.Size != info.Client.Size)
+            CorrectClientSize(info, style, outerSize, after);
+        tracked = Save(tracked with { Monitor = after.Monitor });
+        GiveBackdrop(tracked, after);
     }
 
     /// <summary>
     /// Give a restyled game its backdrop over its monitor, directly behind it, and tell the shell
     /// it is fullscreen so the taskbar drops behind it while it is in front.
     /// </summary>
-    private TrackedWindow WithBackdrop(TrackedWindow tracked, WindowInfo info)
+    private void GiveBackdrop(TrackedWindow tracked, WindowInfo info)
     {
-        tracked = tracked with { Backdrop = windows.CreateBackdrop() };
+        tracked = Save(tracked with { Backdrop = windows.CreateBackdrop() });
         ShowBackdrop(tracked, info);
-        return tracked with { MarkedFullscreen = windows.MarkFullscreen(tracked.Window, true) == ChangeResult.Ok };
+        if (windows.MarkFullscreen(tracked.Window, true) == ChangeResult.Ok) Save(tracked with { MarkedFullscreen = true });
+    }
+
+    /// <summary>Store the record as the window's current one.</summary>
+    private TrackedWindow Save(TrackedWindow tracked)
+    {
+        _tracked[tracked.Window] = tracked;
+        return tracked;
     }
 
     /// <summary>

@@ -480,4 +480,41 @@ public sealed class BackdropTests
 
         AssertNewcomerUntouched(controller, oldBackdrop, other, newcomer, rect, style);
     }
+    [Fact]
+    public void A_backdrop_that_cannot_be_created_still_lets_quitting_put_the_restyled_game_back()
+    {
+        var controller = StartController();
+        var game = _desktop.OpenWindowed(_desktop.StartProcess(Dota), new Size(800, 600), 50, 60, show: false);
+        _desktop.ThrowOnNext(PortCall.CreateBackdrop);
+
+        // The exception reaches the app's crash handler, which then quits.
+        Assert.Throws<InvalidOperationException>(() => _desktop.Show(game));
+        Assert.False(game.HasBorder);
+
+        Assert.Empty(controller.Stop());
+        Assert.True(game.HasBorder);
+        Assert.Equal(Rect.FromPosition(50, 60, new Size(816, 639)), game.Outer);
+        Assert.False(game.IsMarkedFullscreen);
+        Assert.Empty(_desktop.Backdrops);
+        Assert.Empty(controller.TrackedWindows);
+    }
+
+    [Theory]
+    [InlineData(PortCall.ShowBackdrop)]
+    [InlineData(PortCall.MarkFullscreen)]
+    public void A_setup_step_that_throws_after_the_backdrop_was_made_leaves_no_backdrop_after_quitting(PortCall failing)
+    {
+        var controller = StartController();
+        var game = _desktop.OpenWindowed(_desktop.StartProcess(Dota), new Size(800, 600), 50, 60, show: false);
+        _desktop.ThrowOnNext(failing);
+
+        Assert.Throws<InvalidOperationException>(() => _desktop.Show(game));
+        Assert.Single(_desktop.Backdrops);
+
+        Assert.Empty(controller.Stop());
+        Assert.All(_desktop.Backdrops.Values, b => Assert.True(b.IsDestroyed));
+        Assert.True(game.HasBorder);
+        Assert.Equal(Rect.FromPosition(50, 60, new Size(816, 639)), game.Outer);
+        Assert.False(game.IsMarkedFullscreen);
+    }
 }
