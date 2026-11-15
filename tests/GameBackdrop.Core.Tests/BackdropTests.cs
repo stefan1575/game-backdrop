@@ -517,4 +517,113 @@ public sealed class BackdropTests
         Assert.Equal(Rect.FromPosition(50, 60, new Size(816, 639)), game.Outer);
         Assert.False(game.IsMarkedFullscreen);
     }
+    // The game closes while a port call on it is running, and another program's window gets its
+    // handle before the call returns. Every later call must see that the handle is no longer the
+    // game's, and leave the newcomer as it is.
+    private static readonly Rect NewcomerRect = Rect.FromPosition(300, 200, new Size(816, 639));
+
+    private Func<FakeWindow> ReplaceDuringNext(PortCall call, FakeWindow game, bool markedFullscreen = false)
+    {
+        FakeWindow? newcomer = null;
+        _desktop.DuringNext(call, () => newcomer = _desktop.ReplaceUnderItsHandle(
+            game, _desktop.StartProcess(Notepad), FakeWindowSystem.Captioned, NewcomerRect, markedFullscreen));
+        return () => newcomer ?? throw new InvalidOperationException($"No {call} ran.");
+    }
+
+    private void AssertNewcomerKeptAsItWas(FakeWindow newcomer, bool markedFullscreen)
+    {
+        Assert.Equal(NewcomerRect, newcomer.Outer);
+        Assert.Equal(FakeWindowSystem.Captioned, newcomer.Style);
+        Assert.Equal(markedFullscreen, newcomer.IsMarkedFullscreen);
+        Assert.Equal(0, newcomer.BackdropsShownBehind); // not even for a moment
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void A_game_replaced_while_quitting_puts_it_back_leaves_the_newcomer_s_own_fullscreen_mark(bool callSaysGone)
+    {
+        var controller = StartController();
+        var game = OpenGame();
+        if (callSaysGone) _desktop.FailNextChanges(game, ChangeResult.WindowGone);
+        var newcomer = ReplaceDuringNext(PortCall.SetFrame, game, markedFullscreen: true);
+
+        Assert.Empty(controller.Stop());
+
+        AssertNewcomerKeptAsItWas(newcomer(), markedFullscreen: true);
+        Assert.Empty(controller.TrackedWindows);
+    }
+
+    [Theory]
+    [InlineData(PortCall.CreateBackdrop)]
+    [InlineData(PortCall.ShowBackdrop)]
+    public void A_game_replaced_while_its_backdrop_is_made_gives_the_newcomer_no_backdrop_or_mark_and_quitting_leaves_nothing(PortCall during)
+    {
+        var controller = StartController();
+        var game = _desktop.OpenWindowed(_desktop.StartProcess(Dota), new Size(800, 600), show: false);
+        var newcomer = ReplaceDuringNext(during, game);
+
+        _desktop.Show(game);
+
+        AssertNewcomerKeptAsItWas(newcomer(), markedFullscreen: false);
+        Assert.Empty(_desktop.VisibleBackdropsOn(Primary));
+
+        Assert.Empty(controller.Stop());
+        AssertNewcomerKeptAsItWas(newcomer(), markedFullscreen: false);
+        Assert.All(_desktop.Backdrops.Values, b => Assert.True(b.IsDestroyed));
+        Assert.Empty(controller.TrackedWindows);
+    }
+
+    [Theory]
+    [InlineData(1)] // the restyle
+    [InlineData(2)] // the client-size correction: a menu bar on two rows is taller than the port predicts
+    public void A_game_replaced_while_it_is_restyled_gives_the_newcomer_no_backdrop_or_mark(int setFrameCall)
+    {
+        var controller = StartController();
+        var game = _desktop.Open(_desktop.StartProcess(Dota), FakeWindowSystem.Captioned, Rect.FromPosition(100, 100, new Size(816, 679)),
+            show: false, menu: true, menuRows: 2);
+        Func<FakeWindow> newcomer = () => throw new InvalidOperationException("No replacement yet.");
+        if (setFrameCall == 1) newcomer = ReplaceDuringNext(PortCall.SetFrame, game);
+        else _desktop.DuringNext(PortCall.SetFrame, () => newcomer = ReplaceDuringNext(PortCall.SetFrame, game));
+
+        _desktop.Show(game);
+
+        AssertNewcomerKeptAsItWas(newcomer(), markedFullscreen: false);
+        Assert.Empty(_desktop.VisibleBackdropsOn(Primary));
+        Assert.Empty(controller.Stop());
+        Assert.All(_desktop.Backdrops.Values, b => Assert.True(b.IsDestroyed));
+        Assert.Empty(controller.TrackedWindows);
+    }
+
+    [Fact]
+    public void A_game_replaced_while_it_is_moved_to_the_other_monitor_gets_no_backdrop_behind_the_newcomer()
+    {
+        var controller = StartController();
+        var game = OpenGame();
+        var backdrop = BackdropOver(Primary);
+        _desktop.FailNextChanges(game, ChangeResult.WindowGone);
+        var newcomer = ReplaceDuringNext(PortCall.SetFrame, game);
+
+        _desktop.Move(game, Rect.FromPosition(2500, 100, new Size(800, 600)));
+
+        AssertNewcomerKeptAsItWas(newcomer(), markedFullscreen: false);
+        Assert.True(backdrop.IsDestroyed);
+        Assert.Empty(controller.TrackedWindows);
+    }
+
+    [Fact]
+    public void A_game_replaced_while_its_backdrop_is_ordered_on_coming_to_the_foreground_does_not_mark_the_newcomer()
+    {
+        var controller = StartController();
+        var game = OpenGame();
+        var backdrop = BackdropOver(Primary);
+        OpenOtherApp();
+        var newcomer = ReplaceDuringNext(PortCall.ShowBackdrop, game);
+
+        _desktop.UserActivates(game);
+
+        AssertNewcomerKeptAsItWas(newcomer(), markedFullscreen: false);
+        Assert.True(backdrop.IsDestroyed);
+        Assert.Empty(controller.TrackedWindows);
+    }
 }

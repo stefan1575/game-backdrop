@@ -322,6 +322,7 @@ public sealed class FakeWindowSystem : IWindowSystem
         if (window == Foreground) ToFront(window); // as the port does: where Windows is about to put it
         b.Bounds = bounds;
         b.IsVisible = true;
+        window.BackdropsShownBehind++;
         _zOrder.Remove(b);
         _zOrder.Insert(_zOrder.IndexOf(window) + 1, b);
     }
@@ -486,6 +487,9 @@ public sealed class FakeWindow(WindowHandle handle, FakeProcess process, WindowS
 
     /// <summary>The shell has been told this window is fullscreen (MarkFullscreen).</summary>
     public bool IsMarkedFullscreen { get; set; }
+
+    /// <summary>How many times a backdrop has been shown behind this window, even one destroyed since.</summary>
+    public int BackdropsShownBehind { get; set; }
 
     /// <summary>How many more MarkFullscreen calls on this window fail.</summary>
     public int FailedMarks { get; set; }

@@ -193,21 +193,33 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
     }
 
     /// <summary>
-    /// Whether <paramref name="handle"/> is tracked and still has the tracked window behind it:
-    /// the check before any call on a game's handle. A tracked handle that no longer does is
-    /// forgotten (its backdrop destroyed, nothing put back or unmarked: the window it belonged to
-    /// is gone, and the handle may be another window's now).
+    /// Whether <paramref name="handle"/> is tracked and still has the tracked window behind it
+    /// (<see cref="StillLive"/>).
     /// </summary>
     private bool TryGetLive(WindowHandle handle, [NotNullWhen(true)] out TrackedWindow? tracked, [NotNullWhen(true)] out WindowInfo? info)
     {
         info = null;
         if (!_tracked.TryGetValue(handle, out tracked)) return false;
-        info = windows.Describe(handle);
-        if (IsStillTheSameWindow(tracked.Lifetime, info)) return true;
-        Forget(tracked);
+        info = StillLive(tracked);
+        if (info is not null) return true;
         tracked = null;
-        info = null;
         return false;
+    }
+
+    /// <summary>
+    /// The check before each call on a game's handle: the window as it is now if the handle still
+    /// has the tracked window behind it, else null, with the record retired. Any port call can
+    /// outlive the game (it closes, and its handle goes to a new window, while the call runs), so
+    /// this runs again before every next call, not once per event. A retired record is forgotten:
+    /// its backdrop destroyed, nothing put back or unmarked. The window it belonged to is gone,
+    /// and the handle may be another window's now.
+    /// </summary>
+    private WindowInfo? StillLive(TrackedWindow tracked)
+    {
+        var info = windows.Describe(tracked.Window);
+        if (IsStillTheSameWindow(tracked.Lifetime, info)) return info;
+        Forget(tracked);
+        return null;
     }
 
     /// <summary>A top-level window that could be a game's main window.</summary>
@@ -252,26 +264,24 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
         // and brought up to date after each step, so that if a later step throws, the crash
         // handler's Stop still puts the window back and destroys whatever backdrop was made.
         tracked = Save(tracked with { State = TrackedState.Restyled });
-        var after = windows.Describe(info.Handle);
-        if (!IsStillTheSameWindow(info.Lifetime, after))
-        {
-            Forget(tracked); // gone already: nothing to put back
-            return;
-        }
+        // Each StillLive returning null means the window is gone: nothing to put back.
+        if (StillLive(tracked) is not { } after) return;
         if (result == ChangeResult.Ok && after.Client.Size != info.Client.Size)
-            CorrectClientSize(info, style, outerSize, after);
+            CorrectClientSize(info, style, outerSize, after); // same monitor: it centres on the one before
         tracked = Save(tracked with { Monitor = after.Monitor });
-        GiveBackdrop(tracked, after);
+        GiveBackdrop(tracked);
     }
 
     /// <summary>
     /// Give a restyled game its backdrop over its monitor, directly behind it, and tell the shell
     /// it is fullscreen so the taskbar drops behind it while it is in front.
     /// </summary>
-    private void GiveBackdrop(TrackedWindow tracked, WindowInfo info)
+    private void GiveBackdrop(TrackedWindow tracked)
     {
         tracked = Save(tracked with { Backdrop = windows.CreateBackdrop() });
+        if (StillLive(tracked) is not { } info) return;
         ShowBackdrop(tracked, info);
+        if (StillLive(tracked) is null) return;
         if (windows.MarkFullscreen(tracked.Window, true) == ChangeResult.Ok) Save(tracked with { MarkedFullscreen = true });
     }
 
@@ -286,12 +296,13 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
     /// Tell the shell again that a restyled game with a backdrop is fullscreen. Explorer forgets
     /// the mark when the window is hidden (it drops the taskbar tab) and when Explorer restarts,
     /// so this runs each time the game is shown again or comes to the foreground; the call is
-    /// cheap and idempotent. A failed re-mark changes nothing: the next one tries again. Callers
-    /// have just checked the handle (TryGetLive).
+    /// cheap and idempotent. A failed re-mark changes nothing: the next one tries again. It
+    /// follows the backdrop's ShowBackdrop, so it checks the handle again first.
     /// </summary>
     private void MarkAgain(TrackedWindow tracked)
     {
         if (tracked.State != TrackedState.Restyled || tracked.Backdrop is null) return;
+        if (StillLive(tracked) is null) return;
         if (windows.MarkFullscreen(tracked.Window, true) == ChangeResult.Ok && !tracked.MarkedFullscreen)
             _tracked[tracked.Window] = tracked with { MarkedFullscreen = true };
     }
@@ -311,9 +322,9 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
     {
         if (!info.IsVisible || info.IsMinimized || info.Monitor == tracked.Monitor) return;
         windows.SetFrame(tracked.Window, new WindowFrame(info.Style, Placement.Centre(info.Outer.Size, info.Monitor.Bounds)));
-        tracked = tracked with { Monitor = info.Monitor };
-        _tracked[tracked.Window] = tracked;
-        ShowBackdrop(tracked, info);
+        tracked = Save(tracked with { Monitor = info.Monitor });
+        if (StillLive(tracked) is not { } moved) return;
+        ShowBackdrop(tracked, moved);
     }
 
     /// <summary>
@@ -338,11 +349,21 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
         if (tracked.State is not (TrackedState.Restyled or TrackedState.RestorePending)) return null;
         // A window that has gone needs nothing back, and its handle may now be another window
         // (another program's, or a new one of the same game): Describe's lifetime is current.
-        if (!IsStillTheSameWindow(tracked.Lifetime, windows.Describe(tracked.Window))) return null;
-        if (!tracked.FrameRestored && windows.SetFrame(tracked.Window, tracked.Original) is ChangeResult.Ok or ChangeResult.WindowGone)
-            tracked = tracked with { FrameRestored = true };
-        if (tracked.MarkedFullscreen && windows.MarkFullscreen(tracked.Window, false) is ChangeResult.Ok or ChangeResult.WindowGone)
-            tracked = tracked with { MarkedFullscreen = false };
+        // The window can also go while SetFrame runs, so the check runs again before the unmark.
+        // (Not StillLive: the callers decide what becomes of the record.)
+        if (!IsLive(tracked)) return null;
+        if (!tracked.FrameRestored)
+        {
+            var result = windows.SetFrame(tracked.Window, tracked.Original);
+            if (result == ChangeResult.WindowGone) return null; // gone, so nothing to unmark either
+            if (result == ChangeResult.Ok) tracked = tracked with { FrameRestored = true };
+        }
+        if (tracked.MarkedFullscreen)
+        {
+            if (!IsLive(tracked)) return null;
+            if (windows.MarkFullscreen(tracked.Window, false) is ChangeResult.Ok or ChangeResult.WindowGone)
+                tracked = tracked with { MarkedFullscreen = false };
+        }
         return tracked.FrameRestored && !tracked.MarkedFullscreen ? null : tracked;
     }
 
@@ -362,6 +383,9 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
         DropBackdrop(tracked);
         _tracked.Remove(tracked.Window);
     }
+
+    /// <summary>Whether the tracked window is still the one behind its handle, by a fresh Describe.</summary>
+    private bool IsLive(TrackedWindow tracked) => IsStillTheSameWindow(tracked.Lifetime, windows.Describe(tracked.Window));
 
     /// <summary>Whether the window behind a handle is still the one with this lifetime.</summary>
     private static bool IsStillTheSameWindow(long lifetime, [NotNullWhen(true)] WindowInfo? now) => now is not null && now.Lifetime == lifetime;
