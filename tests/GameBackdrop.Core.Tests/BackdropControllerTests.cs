@@ -166,6 +166,17 @@ public sealed class BackdropControllerTests
     }
 
     [Fact]
+    public void A_game_entry_without_an_exe_path_matches_nothing_and_does_not_stop_other_games()
+    {
+        _games.Insert(0, new GameEntry { ExePath = null! });
+        StartController();
+
+        var game = _desktop.OpenWindowed(_desktop.StartProcess(Dota), new Size(800, 600));
+
+        Assert.False(game.HasBorder);
+    }
+
+    [Fact]
     public void A_game_is_matched_by_its_full_path_whatever_the_case()
     {
         StartController();

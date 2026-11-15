@@ -5,7 +5,8 @@ namespace GameBackdrop.Core.Games;
 /// <summary>The games the controller acts on, matched by full exe path, case-insensitively.</summary>
 public sealed class GameList(IEnumerable<GameEntry> games)
 {
-    private readonly IReadOnlyList<GameEntry> _games = games.ToList();
+    // An entry without a path can never match; dropping it keeps matching safe whoever built the list.
+    private readonly IReadOnlyList<GameEntry> _games = games.Where(g => !string.IsNullOrWhiteSpace(g?.ExePath)).ToList();
 
     public static GameList Empty { get; } = new([]);
 

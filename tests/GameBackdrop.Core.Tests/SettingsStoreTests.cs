@@ -92,6 +92,9 @@ public sealed class SettingsStoreTests : IDisposable
     [InlineData("[1, 2, 3]")]
     [InlineData("""{ "games": "nope" }""")]
     [InlineData("null")]
+    [InlineData("""{ "games": [null] }""")]
+    [InlineData("""{ "games": [{ "exePath": null }] }""")]
+    [InlineData("""{ "games": [{ "displayName": "No path" }] }""")]
     public void A_corrupt_file_starts_empty_and_is_left_alone_until_the_next_save(string content)
     {
         Directory.CreateDirectory(_folder);

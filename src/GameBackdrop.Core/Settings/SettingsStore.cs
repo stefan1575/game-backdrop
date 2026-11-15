@@ -47,6 +47,9 @@ public sealed class SettingsStore(string filePath)
                 ?? throw new JsonException("The settings file holds null.");
             settings.Games ??= [];
             if (settings.Games.Any(g => g is null)) throw new JsonException("The game list holds a null entry.");
+            // The JSON reader can leave a non-nullable string null; a game is matched by its path, so it must have one.
+            if (settings.Games.Any(g => string.IsNullOrWhiteSpace(g.ExePath)))
+                throw new JsonException("A game on the list has no exePath.");
             return new(settings, SettingsLoadStatus.Loaded);
         }
         catch (JsonException e)
