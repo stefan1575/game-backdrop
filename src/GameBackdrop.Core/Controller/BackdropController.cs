@@ -69,6 +69,7 @@ public sealed record TrackedWindow(
 public sealed class BackdropController(IWindowSystem windows, GameList games)
 {
     private readonly Dictionary<WindowHandle, TrackedWindow> _tracked = [];
+    private GameList _games = games;
     private bool _running;
 
     public IReadOnlyCollection<TrackedWindow> TrackedWindows => _tracked.Values;
@@ -125,6 +126,42 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
         return notRestored;
     }
 
+    /// <summary>
+    /// Take a changed game list (from the list window). A tracked game that is off the list or
+    /// switched off loses its backdrop and is put back as it was; one that can't be put back yet
+    /// keeps its original, and is tried again by the next list change and on quit. A game still
+    /// on the list keeps its backdrop and takes its entry's new settings. Then, while running,
+    /// the listed games already open and not yet tracked are handled, as at <see cref="Start"/>.
+    /// </summary>
+    public void UpdateGames(GameList games)
+    {
+        _games = games;
+        foreach (var tracked in _tracked.Values.ToList())
+        {
+            var entry = tracked.State == TrackedState.RestorePending ? null : games.FindEnabled(tracked.ProcessPath);
+            if (entry is null) Release(tracked);
+            else Save(tracked with { Game = entry });
+        }
+        if (!_running) return;
+        foreach (var window in windows.TopLevelWindows())
+        {
+            // A window already tracked keeps what it has; nor does one of a game already tracked
+            // take over from its window, as a later window would (a list change is no new window).
+            if (!_tracked.ContainsKey(window)) Consider(window, mayReplace: false);
+        }
+    }
+
+    /// <summary>
+    /// Stop backdropping a window: destroy its backdrop and put it back. One that can't be put
+    /// back yet stays as <see cref="TrackedState.RestorePending"/>, for a later try.
+    /// </summary>
+    private void Release(TrackedWindow tracked)
+    {
+        var left = TryRestore(DropBackdrop(tracked));
+        if (left is null) Forget(tracked);
+        else Save(left with { State = TrackedState.RestorePending });
+    }
+
     private void OnWindowEvent(WindowEvent e)
     {
         switch (e.Kind)
@@ -170,7 +207,9 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
         windows.Activate(tracked.Window);
     }
 
-    private void Consider(WindowHandle handle)
+    /// <param name="mayReplace">Whether this window may take over from a window of the same game
+    /// already tracked (a launcher or splash screen), by <see cref="Replaces"/>.</param>
+    private void Consider(WindowHandle handle, bool mayReplace = true)
     {
         if (TryGetLive(handle, out var known, out var live))
         {
@@ -184,13 +223,13 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
         if (info is null) return;
 
         if (!IsCandidate(info)) return;
-        var game = games.FindEnabled(info.ProcessPath);
+        var game = _games.FindEnabled(info.ProcessPath);
         if (game is null) return;
 
         var current = _tracked.Values.FirstOrDefault(t => t.ProcessId == info.ProcessId && t.State != TrackedState.RestorePending);
         if (current is not null)
         {
-            if (!Replaces(info, current)) return;
+            if (!mayReplace || !Replaces(info, current)) return;
             current = DropBackdrop(current);
             var left = TryRestore(current);
             if (left is null) _tracked.Remove(current.Window);
