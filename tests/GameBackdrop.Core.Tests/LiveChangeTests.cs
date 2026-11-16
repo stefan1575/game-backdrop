@@ -234,6 +234,50 @@ public sealed class LiveChangeTests
         AssertBackdroppedAndMarked(game, Primary);
     }
 
+    [Fact]
+    public void A_game_moved_to_the_centre_of_the_other_monitor_takes_its_backdrop_there()
+    {
+        StartController();
+        var game = OpenGame();
+        var changes = _desktop.FrameChanges.Count;
+
+        _desktop.Move(game, Rect.FromPosition(1920 + 880, -200 + 420, new Size(800, 600)));
+
+        Assert.Equal(changes, _desktop.FrameChanges.Count);
+        AssertBackdroppedAndMarked(game, Secondary);
+        Assert.Empty(_desktop.VisibleBackdropsOn(Primary));
+    }
+
+    // --- A switch made while the window is hidden ---
+
+    [Fact]
+    public void A_restyled_game_that_hides_its_window_to_go_fullscreen_is_released_when_it_shows_again()
+    {
+        StartController();
+        var game = OpenGame();
+        _desktop.Hide(game);
+        _desktop.SetOwnFrame(game, FakeWindowSystem.Popup, Primary.Bounds);
+
+        _desktop.Show(game);
+
+        AssertNoVisibleBackdropAndNotMarked(game);
+        AssertFrame(game, new WindowFrame(FakeWindowSystem.Popup, Primary.Bounds));
+    }
+
+    [Fact]
+    public void A_fullscreen_game_that_hides_its_window_to_go_windowed_is_restyled_when_it_shows_again()
+    {
+        StartController();
+        var game = _desktop.OpenPopup(_desktop.StartProcess(Dota), Primary.Bounds);
+        _desktop.Hide(game);
+        _desktop.SetOwnFrame(game, FakeWindowSystem.Captioned, Rect.FromPosition(100, 100, new Size(1296, 759)));
+
+        _desktop.Show(game);
+
+        Assert.Equal(Rect.FromPosition(320, 180, new Size(1280, 720)), game.Outer);
+        AssertBackdroppedAndMarked(game, Primary);
+    }
+
     // --- Never fighting the game ---
 
     [Fact]

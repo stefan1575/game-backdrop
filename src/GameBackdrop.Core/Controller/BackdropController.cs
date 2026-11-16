@@ -209,8 +209,13 @@ public sealed class BackdropController(IWindowSystem windows, GameList games, Ti
     {
         if (TryGetLive(handle, out var known, out var live))
         {
-            // The same window shown again: it keeps its backdrop, and its first original.
-            ShowBackdrop(known, live);
+            // The same window shown again: it keeps its backdrop, and its first original. A game
+            // that hides its window while it switches mode is shown in its new one, which its
+            // LocationChanged events, ignored while it was hidden, didn't get to follow.
+            Reassess(known, live);
+            // Reassess can have made port calls: the window is checked again before the next.
+            if (!_tracked.TryGetValue(handle, out known) || StillLive(known) is not { } now) return;
+            ShowBackdrop(known, now);
             MarkAgain(known);
             return;
         }
@@ -456,8 +461,11 @@ public sealed class BackdropController(IWindowSystem windows, GameList games, Ti
         var target = Placement.Centre(outerSize, info.Monitor.Bounds);
         if (style == info.Style && target == info.Outer)
         {
-            // Already where it goes (a game that resized about its centre), on the same monitor.
-            Save(Known(tracked, info));
+            // Already where it goes (a game that resized about its centre). No port call has run
+            // since info's Describe, so a backdrop that has to follow it can be shown at once.
+            var arrived = info.Monitor != tracked.Monitor;
+            tracked = Save(Known(tracked, info));
+            if (arrived) ShowBackdrop(tracked, info);
             return;
         }
         if (StillLive(tracked) is null) return;
