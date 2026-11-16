@@ -7,13 +7,15 @@ namespace GameBackdrop;
 
 /// <summary>
 /// The tray icon and its menu, and the wiring: settings → game list → controller over the Win32
-/// window system. Every changed game window is put back when the app quits, however it quits.
+/// window system, and the hotkey that toggles the backdrop for the game in front. Every changed
+/// game window is put back when the app quits, however it quits.
 /// </summary>
 internal sealed class TrayApplication : ApplicationContext
 {
     private readonly NotifyIcon _icon;
     private readonly Win32WindowSystem _windows;
     private readonly BackdropController _controller;
+    private readonly GlobalHotkey? _hotkey;
     private bool _failureReported;
     private bool _crashing;
 
@@ -41,18 +43,29 @@ internal sealed class TrayApplication : ApplicationContext
         AppDomain.CurrentDomain.UnhandledException += (_, e) => Crash(e.ExceptionObject as Exception);
         Application.ApplicationExit += (_, _) => StopController();
 
+        // One balloon at a time shows, so every startup notice goes in the same one (Windows cuts
+        // its text at 255 characters; both together only come with a corrupt file).
+        var notices = new List<string>();
         if (loaded.Status == SettingsLoadStatus.Corrupt)
-        {
-            _icon.ShowBalloonTip(5000, "Game Backdrop",
-                $"The settings file couldn't be read, so no games are listed. It is left as it is: {settings.FilePath}",
-                ToolTipIcon.Warning);
-        }
+            notices.Add($"The settings file couldn't be read, so no games are listed. It is left as it is: {settings.FilePath}");
 
         _controller.Start();
+
+        var hotkey = Hotkey.FromSettings(loaded.Settings.Hotkey, out var understood);
+        if (!understood)
+            notices.Add($"The hotkey \"{loaded.Settings.Hotkey}\" in the settings isn't one the app can read, so {hotkey} is used.");
+        // Another app holding the keys means no toggle, and a notice: never a crash.
+        _hotkey = GlobalHotkey.TryRegister(hotkey, _controller.ToggleBackdrop);
+        if (_hotkey is null)
+            notices.Add($"{hotkey} is taken by another app, so it won't toggle the backdrop. Set another \"hotkey\" in the settings file.");
+
+        if (notices.Count > 0)
+            _icon.ShowBalloonTip(5000, "Game Backdrop", string.Join("\n\n", notices), ToolTipIcon.Warning);
     }
 
     protected override void ExitThreadCore()
     {
+        _hotkey?.Dispose();
         StopController();
         _icon.Visible = false;
         base.ExitThreadCore();
@@ -62,6 +75,7 @@ internal sealed class TrayApplication : ApplicationContext
     {
         if (disposing)
         {
+            _hotkey?.Dispose();
             StopController();
             _icon.Dispose();
             _windows.Dispose();
