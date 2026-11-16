@@ -95,6 +95,17 @@ public sealed class FakeWindowSystem : IWindowSystem
     }
 
     /// <summary>
+    /// The window is shown without activation (SW_SHOWNA): it comes to the front but the
+    /// foreground stays where it is, so only Shown is raised.
+    /// </summary>
+    public void ShowWithoutActivating(FakeWindow window)
+    {
+        window.IsVisible = true;
+        ToFront(window);
+        Raise(WindowEventKind.Shown, window);
+    }
+
+    /// <summary>
     /// The window hides itself (Hidden); the foreground passes on if it had it. As Explorer does,
     /// the shell drops the hidden window's taskbar tab and forgets its fullscreen mark.
     /// </summary>

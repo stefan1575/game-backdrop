@@ -206,6 +206,51 @@ public sealed class ToggleTests
     }
 
     [Fact]
+    public void The_game_in_front_when_the_app_starts_is_toggled_after_the_user_switches_to_another_app()
+    {
+        var dota = OpenGame(Dota);
+        var controller = StartController();
+        OpenOtherApp();
+
+        controller.ToggleBackdrop();
+
+        AssertBackdropOff(dota, OpenedAt(100, 100));
+    }
+
+    [Fact]
+    public void Closing_the_game_most_recently_in_front_hands_the_toggle_to_the_one_in_front_before_it()
+    {
+        var controller = StartController();
+        var dota = OpenGame(Dota);
+        var novel = OpenGame(Novel, left: 2000, top: 0);
+        _desktop.UserActivates(dota);
+        _desktop.UserActivates(novel);
+        OpenOtherApp();
+        _desktop.Close(novel);
+
+        controller.ToggleBackdrop();
+
+        AssertBackdropOff(dota, OpenedAt(100, 100));
+    }
+
+    [Fact]
+    public void A_main_window_that_replaced_the_splash_in_front_keeps_its_place_in_the_toggle_s_history()
+    {
+        var controller = StartController();
+        var process = _desktop.StartProcess(Dota);
+        _desktop.OpenPopup(process, Rect.FromPosition(800, 400, new Size(320, 200)));
+        // The main window comes up without taking the foreground, so it never gets a Foreground event.
+        var main = _desktop.OpenWindowed(process, new Size(800, 600), show: false);
+        _desktop.ShowWithoutActivating(main);
+        AssertBackdropOn(main);
+        OpenOtherApp();
+
+        controller.ToggleBackdrop();
+
+        AssertBackdropOff(main, OpenedAt(100, 100));
+    }
+
+    [Fact]
     public void Toggling_on_takes_the_window_as_the_user_left_it_and_quitting_puts_that_back()
     {
         var controller = StartController();
