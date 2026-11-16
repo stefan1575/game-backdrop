@@ -69,9 +69,19 @@ public sealed record TrackedWindow(
 public sealed class BackdropController(IWindowSystem windows, GameList games)
 {
     private readonly Dictionary<WindowHandle, TrackedWindow> _tracked = [];
+    // The launches (process id and start time) the administrator notice has been raised for.
+    private readonly HashSet<(int ProcessId, long Started)> _noticedLaunches = [];
     private bool _running;
 
     public IReadOnlyCollection<TrackedWindow> TrackedWindows => _tracked.Values;
+
+    /// <summary>
+    /// A listed game's window refused to be restyled (access denied): the game runs as
+    /// administrator and the app doesn't. Raised once per launch of the game, however many windows
+    /// it opens, from inside the controller's own handling; the window is left as it is and not
+    /// tried again. A handler must not call back into the controller.
+    /// </summary>
+    public event Action<GameEntry>? GameRunsAsAdministrator;
 
     /// <summary>Start watching, and handle the listed games that are already running.</summary>
     public void Start()
@@ -267,6 +277,7 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
         {
             case ChangeResult.AccessDenied:
                 Save(tracked with { State = TrackedState.AccessDenied });
+                if (_noticedLaunches.Add((info.ProcessId, info.ProcessStarted))) GameRunsAsAdministrator?.Invoke(game);
                 return;
             case ChangeResult.WindowGone:
             case ChangeResult.Failed:

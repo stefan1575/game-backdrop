@@ -13,6 +13,9 @@ public sealed record WindowFrame(WindowStyle Style, Rect Outer);
 /// window once its window is destroyed, so the port numbers each window the first time it
 /// describes it and drops the number when that window's destroy event reaches it: a later window
 /// with the same handle gets a new number. It doesn't change when the window changes itself.</param>
+/// <param name="ProcessStarted">When the owning process started (a FILETIME), or 0 when it can't
+/// be read. Windows reuses process ids, so the id and start time together tell one run of a
+/// program from a later one.</param>
 /// <param name="ProcessPath">Full path of the owning process's exe, or null when it can't be read.</param>
 /// <param name="Outer">The window rect (GetWindowRect).</param>
 /// <param name="Client">The client area in screen coordinates.</param>
@@ -22,6 +25,7 @@ public sealed record WindowInfo(
     WindowHandle Handle,
     long Lifetime,
     int ProcessId,
+    long ProcessStarted,
     string? ProcessPath,
     Rect Outer,
     Rect Client,

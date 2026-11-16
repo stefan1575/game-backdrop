@@ -35,6 +35,7 @@ public sealed class FakeWindowSystem : IWindowSystem
     private readonly List<FakeWindow> _windows = [];
     private nint _nextHandle = 0x1000;
     private int _nextProcessId = 100;
+    private long _nextProcessStart = 1;
     private long _nextLifetime = 1;
 
     // Like the Win32 port: the lifetime it gave each handle when it first described it, dropped
@@ -65,8 +66,13 @@ public sealed class FakeWindowSystem : IWindowSystem
     /// <summary>Every SetFrame call, in order, including ones that failed.</summary>
     public List<(WindowHandle Window, WindowFrame Frame)> FrameChanges { get; } = [];
 
-    /// <summary>Start a process: windows opened with it share its id and exe path.</summary>
-    public FakeProcess StartProcess(string exePath, bool elevated = false) => new(this, _nextProcessId++, exePath, elevated);
+    /// <summary>
+    /// Start a process: windows opened with it share its id, start time and exe path. Pass
+    /// <paramref name="reusingIdOf"/> for a process that gets the id of one that has exited, as
+    /// Windows recycles process ids; its start time still differs.
+    /// </summary>
+    public FakeProcess StartProcess(string exePath, bool elevated = false, FakeProcess? reusingIdOf = null) =>
+        new(this, reusingIdOf?.Id ?? _nextProcessId++, _nextProcessStart++, exePath, elevated);
 
     /// <summary>Open a captioned window whose client area is <paramref name="clientSize"/>, at <paramref name="left"/>,<paramref name="top"/>.</summary>
     public FakeWindow OpenWindowed(FakeProcess process, Size clientSize, int left = 100, int top = 100, bool show = true) =>
@@ -276,7 +282,7 @@ public sealed class FakeWindowSystem : IWindowSystem
         var w = Find(handle);
         if (w is null) return null;
         if (!_lifetimes.TryGetValue(handle, out var lifetime)) _lifetimes[handle] = lifetime = w.Lifetime;
-        return new WindowInfo(w.Handle, lifetime, w.Process.Id, w.Process.ExePath, w.Outer, w.Client, w.Style,
+        return new WindowInfo(w.Handle, lifetime, w.Process.Id, w.Process.Started, w.Process.ExePath, w.Outer, w.Client, w.Style,
             w.IsVisible, w.IsMinimized, w.Owner is not null, MonitorOf(w.Outer));
     }
 
@@ -554,7 +560,7 @@ public sealed class FakeBackdrop(BackdropHandle handle)
     public bool IsDestroyed { get; set; }
 }
 
-public sealed record FakeProcess(FakeWindowSystem System, int Id, string ExePath, bool Elevated);
+public sealed record FakeProcess(FakeWindowSystem System, int Id, long Started, string ExePath, bool Elevated);
 
 public sealed class FakeWindow(WindowHandle handle, FakeProcess process, WindowStyle style, Rect outer, long lifetime)
 {
