@@ -8,7 +8,7 @@ namespace GameBackdrop.Core.Tests;
 /// <see cref="FakeWindowSystem.ThrowOnNext"/>) first, then the rest, which the fake also numbers
 /// (<see cref="FakeWindowSystem.AfterCall"/>).
 /// </summary>
-public enum PortCall { SetFrame, CreateBackdrop, ShowBackdrop, MarkFullscreen, TopLevelWindows, Describe, OuterSizeFor, HideBackdrop, DestroyBackdrop, Activate }
+public enum PortCall { SetFrame, CreateBackdrop, ShowBackdrop, MarkFullscreen, TopLevelWindows, Describe, OuterSizeFor, HideBackdrop, DestroyBackdrop, Activate, ForegroundWindow }
 
 /// <summary>
 /// A scripted desktop: monitors, windows with styles and rects, one Z order (windows and
@@ -260,6 +260,14 @@ public sealed class FakeWindowSystem : IWindowSystem
         var handles = _windows.Select(w => w.Handle).ToList();
         End(PortCall.TopLevelWindows);
         return handles;
+    }
+
+    public WindowHandle? ForegroundWindow()
+    {
+        Begin(PortCall.ForegroundWindow);
+        var handle = Foreground?.Handle;
+        End(PortCall.ForegroundWindow);
+        return handle;
     }
 
     public WindowInfo? Describe(WindowHandle handle)

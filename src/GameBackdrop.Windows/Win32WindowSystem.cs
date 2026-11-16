@@ -74,6 +74,12 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
         return handles;
     }
 
+    public WindowHandle? ForegroundWindow()
+    {
+        var hwnd = GetForegroundWindow();
+        return hwnd == 0 ? null : new WindowHandle(hwnd);
+    }
+
     public WindowInfo? Describe(WindowHandle window)
     {
         CatchUp();
