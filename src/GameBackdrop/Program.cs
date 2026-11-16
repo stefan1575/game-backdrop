@@ -1,4 +1,6 @@
 using GameBackdrop.Core.Settings;
+using GameBackdrop.Core.Startup;
+using GameBackdrop.Windows;
 
 namespace GameBackdrop;
 
@@ -8,7 +10,9 @@ internal static class Program
 
     /// <summary>
     /// Usage: <c>GameBackdrop.exe [--settings &lt;path&gt;]</c>. The settings file defaults to
-    /// <c>%APPDATA%\GameBackdrop\settings.json</c>.
+    /// <c>%APPDATA%\GameBackdrop\settings.json</c>, and the Start at logon shortcut goes in the
+    /// user's Startup folder. A run with its own <c>--settings</c> file keeps its shortcut in a
+    /// <c>Startup</c> folder beside that file instead, so a test run leaves the real one alone.
     /// </summary>
     [STAThread]
     private static int Main(string[] args)
@@ -17,12 +21,22 @@ internal static class Program
         if (!createdNew) return 0; // Another copy is running; for now a second launch just exits.
 
         ApplicationConfiguration.Initialize();
-        var settingsPath = SettingsPathFrom(args) ?? SettingsStore.DefaultPath;
+        var customSettings = SettingsPathFrom(args);
+        var store = new SettingsStore(customSettings ?? SettingsStore.DefaultPath);
 
-        using var tray = new TrayApplication(new SettingsStore(settingsPath));
+        using var tray = new TrayApplication(store, new StartAtLogon(store, StartupShortcutFor(customSettings)));
         Application.Run(tray);
         GC.KeepAlive(mutex);
         return 0;
+    }
+
+    private static StartupShortcut StartupShortcutFor(string? customSettings)
+    {
+        var exe = Environment.ProcessPath ?? Application.ExecutablePath;
+        return customSettings is null
+            ? new StartupShortcut(StartupShortcut.UserStartupFolder, exe, "")
+            : new StartupShortcut(Path.Combine(Path.GetDirectoryName(customSettings)!, "Startup"), exe,
+                $"--settings \"{customSettings}\"");
     }
 
     private static string? SettingsPathFrom(string[] args)

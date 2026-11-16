@@ -1,6 +1,8 @@
+using System.Runtime.InteropServices;
 using GameBackdrop.Core.Controller;
 using GameBackdrop.Core.Games;
 using GameBackdrop.Core.Settings;
+using GameBackdrop.Core.Startup;
 using GameBackdrop.Windows;
 
 namespace GameBackdrop;
@@ -14,10 +16,11 @@ internal sealed class TrayApplication : ApplicationContext
     private readonly NotifyIcon _icon;
     private readonly Win32WindowSystem _windows;
     private readonly BackdropController _controller;
+    private readonly StartAtLogon _startAtLogon;
     private bool _failureReported;
     private bool _crashing;
 
-    public TrayApplication(SettingsStore settings)
+    public TrayApplication(SettingsStore settings, StartAtLogon startAtLogon)
     {
         // The window system posts its events here; Application.Run would install it too, but
         // the controller starts (and may get events) before that.
@@ -27,8 +30,20 @@ internal sealed class TrayApplication : ApplicationContext
         _windows = new Win32WindowSystem();
         _controller = new BackdropController(_windows, new GameList(loaded.Settings.Games));
 
+        _startAtLogon = startAtLogon;
+        var startAtLogonItem = new ToolStripMenuItem("Start at logon");
+        startAtLogonItem.Click += (_, _) => ToggleStartAtLogon();
+
         var menu = new ContextMenuStrip();
+        menu.Items.Add(startAtLogonItem);
+        menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Quit", null, (_, _) => ExitThread());
+        // Read fresh each time: the shortcut or the settings file may have changed outside the app.
+        menu.Opening += (_, _) =>
+        {
+            startAtLogonItem.Checked = _startAtLogon.IsOn;
+            startAtLogonItem.Enabled = _startAtLogon.CanRecord;
+        };
         _icon = new NotifyIcon
         {
             Icon = SystemIcons.Application,
@@ -48,7 +63,30 @@ internal sealed class TrayApplication : ApplicationContext
                 ToolTipIcon.Warning);
         }
 
+        try
+        {
+            _startAtLogon.ApplyAtStart();
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or COMException)
+        {
+            _icon.ShowBalloonTip(5000, "Game Backdrop",
+                $"Couldn't set up starting at logon: {e.Message}", ToolTipIcon.Warning);
+        }
+
         _controller.Start();
+    }
+
+    private void ToggleStartAtLogon()
+    {
+        try
+        {
+            _startAtLogon.Set(!_startAtLogon.IsOn);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or COMException or InvalidOperationException)
+        {
+            _icon.ShowBalloonTip(5000, "Game Backdrop",
+                $"Couldn't change starting at logon: {e.Message}", ToolTipIcon.Warning);
+        }
     }
 
     protected override void ExitThreadCore()
