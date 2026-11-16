@@ -172,6 +172,45 @@ public sealed class GameListModelTests : IDisposable
         Assert.Empty(Directory.GetFiles(_folder, "*.tmp"));
     }
 
+    /// <summary>A file written by hand with the same exe twice (other case, forward slashes), both on.</summary>
+    private void WriteDuplicateEntries()
+    {
+        Directory.CreateDirectory(_folder);
+        File.WriteAllText(FilePath, """
+            { "games": [
+              { "exePath": "C:\\Games\\x.exe", "displayName": "X" },
+              { "exePath": "c:/games/X.exe", "displayName": "X again" }
+            ] }
+            """);
+    }
+
+    [Fact]
+    public void A_game_listed_twice_by_hand_is_switched_off_by_one_change()
+    {
+        WriteDuplicateEntries();
+        var model = Open();
+
+        model.SetEnabled(@"C:\Games\x.exe", false);
+
+        Assert.Equal(2, Saved().Count);
+        Assert.All(Saved(), g => Assert.False(g.Enabled));
+        Assert.Null(model.ToGameList().FindEnabled(@"C:\Games\x.exe"));
+    }
+
+    [Fact]
+    public void A_game_listed_twice_by_hand_is_renamed_and_removed_by_one_change()
+    {
+        WriteDuplicateEntries();
+        var model = Open();
+
+        model.Rename(@"C:\Games\x.exe", "Same game");
+        Assert.All(Saved(), g => Assert.Equal("Same game", g.DisplayName));
+
+        model.Remove("c:/games/X.exe");
+        Assert.Empty(Saved());
+        Assert.Empty(model.Games);
+    }
+
     [Fact]
     public void A_change_leaves_the_entries_read_before_it_as_they_were()
     {

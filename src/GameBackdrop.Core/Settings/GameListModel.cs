@@ -84,26 +84,29 @@ public sealed class GameListModel
     /// <summary>Switch a game's "keep mouse inside" on or off. False if the game isn't listed.</summary>
     public bool SetKeepMouseInside(string exePath, bool keepInside) => Change(exePath, g => g.KeepMouseInside = keepInside);
 
-    /// <summary>Take a game off the list. False if it isn't listed.</summary>
+    /// <summary>Take a game off the list (every entry for its exe). False if it isn't listed.</summary>
     public bool Remove(string exePath)
     {
-        var index = IndexOf(exePath);
-        if (index < 0) return false;
-        var games = _settings.Games.ToList();
-        games.RemoveAt(index);
-        Commit(games);
+        if (!_settings.Games.Any(g => g.IsFor(exePath))) return false;
+        Commit(_settings.Games.Where(g => !g.IsFor(exePath)).ToList());
         return true;
     }
 
+    /// <summary>
+    /// Change every entry for the exe. Add refuses a second one, but a file written by hand can
+    /// list an exe twice (other case or slashes); the controller matches the first one on, so a
+    /// change to only one of them could leave the game on.
+    /// </summary>
     private bool Change(string exePath, Action<GameEntry> change)
     {
-        var index = IndexOf(exePath);
-        if (index < 0) return false;
-        var games = _settings.Games.ToList();
-        var changed = games[index].Copy();
-        change(changed);
-        games[index] = changed;
-        Commit(games);
+        if (!_settings.Games.Any(g => g.IsFor(exePath))) return false;
+        Commit(_settings.Games.Select(g =>
+        {
+            if (!g.IsFor(exePath)) return g;
+            var changed = g.Copy();
+            change(changed);
+            return changed;
+        }).ToList());
         return true;
     }
 
@@ -116,8 +119,6 @@ public sealed class GameListModel
         if (File.Exists(path)) File.Copy(path, copy, overwrite: false);
         _corruptFileToKeep = false;
     }
-
-    private int IndexOf(string exePath) => _settings.Games.FindIndex(g => g.IsFor(exePath));
 
     private static string? NameOrNull(string? name) => string.IsNullOrWhiteSpace(name) ? null : name.Trim();
 
