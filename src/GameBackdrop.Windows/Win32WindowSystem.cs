@@ -342,7 +342,7 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
         return error == 0;
     }
 
-    private static string? ProcessPath(uint processId)
+    internal static string? ProcessPath(uint processId)
     {
         var process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, processId);
         if (process == 0) return null;
