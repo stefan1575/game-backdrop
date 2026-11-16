@@ -58,17 +58,9 @@ internal sealed class OpenWindowPicker : Form
         AcceptButton = _add;
         CancelButton = cancel;
 
-        var left = new FlowLayoutPanel { Dock = DockStyle.Left, AutoSize = true, WrapContents = false, Padding = new Padding(8) };
-        left.Controls.Add(refresh);
-        var right = new FlowLayoutPanel { Dock = DockStyle.Right, AutoSize = true, WrapContents = false, Padding = new Padding(8) };
-        right.Controls.AddRange([_add, cancel]);
-        var bottom = new Panel { Dock = DockStyle.Bottom, AutoSize = true };
-        bottom.Controls.Add(left);
-        bottom.Controls.Add(right);
-
         Controls.Add(_list);
         Controls.Add(_empty);
-        Controls.Add(bottom);
+        Controls.Add(ButtonRow.Create([refresh], [_add, cancel]));
     }
 
     /// <summary>The window picked, once the dialog returns OK.</summary>

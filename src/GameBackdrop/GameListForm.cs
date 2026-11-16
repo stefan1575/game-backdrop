@@ -89,22 +89,8 @@ internal sealed class GameListForm : Form
         close.Click += (_, _) => Close();
         CancelButton = close;
 
-        var buttons = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Fill, AutoSize = true, WrapContents = false, Padding = new Padding(8),
-        };
-        buttons.Controls.AddRange([addExe, addOpen, _rename, _remove]);
-        var right = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Right, AutoSize = true, WrapContents = false, Padding = new Padding(8),
-        };
-        right.Controls.Add(close);
-        var bottom = new Panel { Dock = DockStyle.Bottom, AutoSize = true };
-        bottom.Controls.Add(buttons);
-        bottom.Controls.Add(right);
-
         Controls.Add(_grid);
-        Controls.Add(bottom);
+        Controls.Add(ButtonRow.Create([addExe, addOpen, _rename, _remove], [close]));
 
         _model.Changed += QueueReload;
         Reload();
