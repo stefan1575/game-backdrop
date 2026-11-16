@@ -54,6 +54,11 @@ public sealed record TrackedWindow(
     bool MarkedFullscreen = false,
     bool FrameRestored = false);
 
+/// <summary>What <see cref="BackdropController.HandOver"/> did.</summary>
+/// <param name="HandedOver">Every game was put back and the replacement started: this copy is to quit now.</param>
+/// <param name="NotRestored">The windows that couldn't be put back, which stopped the hand-over.</param>
+public sealed record HandOverResult(bool HandedOver, IReadOnlyList<TrackedWindow> NotRestored);
+
 /// <summary>
 /// Turns window events into actions on the window system: a state machine per tracked game
 /// window. Single-threaded: call it, and raise the port's events, from one thread.
@@ -83,7 +88,12 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
     /// </summary>
     public event Action<GameEntry>? GameRunsAsAdministrator;
 
-    /// <summary>Start watching, and handle the listed games that are already running.</summary>
+    /// <summary>
+    /// Start watching, and handle the listed games that are already running. After a
+    /// <see cref="Stop"/> that couldn't put a game back, starting again picks that game up where
+    /// it was: still changed, it gets its backdrop again; back but still marked fullscreen, the
+    /// unmark is retried and the game is handled afresh.
+    /// </summary>
     public void Start()
     {
         if (_running) return;
@@ -110,6 +120,28 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
         // couldn't be put back.
         foreach (var tracked in _tracked.Values.ToList()) DropBackdrop(tracked);
         return RestoreAll();
+    }
+
+    /// <summary>
+    /// Hand the games over to a copy that takes over from this one (the restart as
+    /// administrator): stop and put every game back, retrying a failed restore up to
+    /// <paramref name="retries"/> times, and only then start the replacement. The replacement
+    /// saves each window as it finds it as the original, so a game still changed when it starts
+    /// would never be put back. If a game can't be put back, or the replacement doesn't start
+    /// (<paramref name="startReplacement"/> returns false), nothing is handed over: this
+    /// controller starts again, changing the games again, and the caller keeps running.
+    /// </summary>
+    public HandOverResult HandOver(Func<bool> startReplacement, int retries = 0, Action? beforeRetry = null)
+    {
+        var notRestored = Stop();
+        for (var attempt = 0; attempt < retries && notRestored.Count > 0; attempt++)
+        {
+            beforeRetry?.Invoke();
+            notRestored = Stop();
+        }
+        if (notRestored.Count == 0 && startReplacement()) return new HandOverResult(true, []);
+        Start();
+        return new HandOverResult(false, notRestored);
     }
 
     /// <summary>
@@ -184,10 +216,32 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
     {
         if (TryGetLive(handle, out var known, out var live))
         {
-            // The same window shown again: it keeps its backdrop, and its first original.
-            ShowBackdrop(known, live);
-            MarkAgain(known);
-            return;
+            if (known is { State: TrackedState.Restyled, Backdrop: null })
+            {
+                // Left by a restore that didn't finish (a Stop, then Start again).
+                if (!known.FrameRestored)
+                {
+                    // Still changed: it keeps its first original and gets its backdrop back.
+                    GiveBackdrop(known);
+                    return;
+                }
+                // Back as it was; only the unmark is left. Once that is done the window is
+                // unchanged and untracked, so it is decided on afresh below.
+                var left = TryRestore(known);
+                if (left is not null)
+                {
+                    Save(left);
+                    return;
+                }
+                Forget(known);
+            }
+            else
+            {
+                // The same window shown again: it keeps its backdrop, and its first original.
+                ShowBackdrop(known, live);
+                MarkAgain(known);
+                return;
+            }
         }
         // Not tracked, or the tracked window is gone (and forgotten): whatever has the handle now is new.
         var info = windows.Describe(handle);
