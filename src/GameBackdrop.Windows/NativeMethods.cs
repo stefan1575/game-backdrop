@@ -240,6 +240,19 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     public static extern nint GetForegroundWindow();
 
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool ClipCursor(ref RECT lpRect);
+
+    /// <summary>ClipCursor(NULL): the cursor is free to go anywhere on the screen.</summary>
+    [DllImport("user32.dll", SetLastError = true, EntryPoint = "ClipCursor")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool FreeCursor(nint none);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool GetClipCursor(out RECT lpRect);
+
     [DllImport("user32.dll", EntryPoint = "LoadCursorW")]
     public static extern nint LoadCursor(nint hInstance, nint lpCursorName);
 
