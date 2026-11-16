@@ -15,6 +15,7 @@ namespace GameBackdrop.Windows.Tests;
 /// A test that can't set up what it checks here (the foreground, a shell taskbar) passes without
 /// checking and says so in its output (<c>dotnet test --logger "console;verbosity=detailed"</c>).
 /// </summary>
+[Collection(DesktopCollection.Name)]
 public sealed class Win32WindowSystemTests : IDisposable
 {
     private readonly ITestOutputHelper _output;
@@ -63,6 +64,18 @@ public sealed class Win32WindowSystemTests : IDisposable
         Assert.Equal(original.Outer, reopened.Outer);
         Assert.Equal(original.Client.Size, reopened.Client.Size);
         Assert.True(reopened.Style.HasCaption);
+    }
+
+    [Fact]
+    public void The_foreground_window_is_the_one_the_user_is_in()
+    {
+        if (!TryMakeForeground(_hwnd))
+        {
+            _output.WriteLine("Not checked: Windows wouldn't give the test window the foreground.");
+            return;
+        }
+
+        Assert.Equal(new WindowHandle(_hwnd), _windows.ForegroundWindow());
     }
 
     [Fact]
