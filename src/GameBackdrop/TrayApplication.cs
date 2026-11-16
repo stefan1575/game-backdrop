@@ -14,6 +14,8 @@ internal sealed class TrayApplication : ApplicationContext
     private readonly NotifyIcon _icon;
     private readonly Win32WindowSystem _windows;
     private readonly BackdropController _controller;
+    private readonly GameListModel _games;
+    private GameListForm? _list;
     private bool _failureReported;
     private bool _crashing;
 
@@ -23,11 +25,18 @@ internal sealed class TrayApplication : ApplicationContext
         // the controller starts (and may get events) before that.
         SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
 
-        var loaded = settings.Load();
+        _games = GameListModel.Load(settings);
         _windows = new Win32WindowSystem();
-        _controller = new BackdropController(_windows, new GameList(loaded.Settings.Games));
+        _controller = new BackdropController(_windows, _games.ToGameList());
+        // Each saved change reaches the running controller at once: a game switched off or
+        // removed is put back, one switched on or added is handled if it's running.
+        _games.Changed += () => _controller.UpdateGames(_games.ToGameList());
 
         var menu = new ContextMenuStrip();
+        var openList = new ToolStripMenuItem("Open list", null, (_, _) => ShowList());
+        openList.Font = new Font(openList.Font, FontStyle.Bold);
+        menu.Items.Add(openList);
+        menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Quit", null, (_, _) => ExitThread());
         _icon = new NotifyIcon
         {
@@ -36,19 +45,37 @@ internal sealed class TrayApplication : ApplicationContext
             ContextMenuStrip = menu,
             Visible = true,
         };
+        _icon.MouseDoubleClick += (_, e) =>
+        {
+            if (e.Button == MouseButtons.Left) ShowList();
+        };
 
         Application.ThreadException += (_, e) => Crash(e.Exception);
         AppDomain.CurrentDomain.UnhandledException += (_, e) => Crash(e.ExceptionObject as Exception);
         Application.ApplicationExit += (_, _) => StopController();
 
-        if (loaded.Status == SettingsLoadStatus.Corrupt)
+        if (_games.LoadStatus == SettingsLoadStatus.Corrupt)
         {
             _icon.ShowBalloonTip(5000, "Game Backdrop",
-                $"The settings file couldn't be read, so no games are listed. It is left as it is: {settings.FilePath}",
+                $"The settings file couldn't be read, so no games are listed. It is left as it is until the list " +
+                $"is changed, and then kept beside it as a .corrupt copy: {settings.FilePath}",
                 ToolTipIcon.Warning);
         }
 
         _controller.Start();
+    }
+
+    /// <summary>Open the game list window, or bring it to the front if it's open.</summary>
+    public void ShowList()
+    {
+        if (_list is null || _list.IsDisposed)
+        {
+            _list = new GameListForm(_games);
+            _list.FormClosed += (_, _) => _list = null;
+        }
+        _list.Show();
+        if (_list.WindowState == FormWindowState.Minimized) _list.WindowState = FormWindowState.Normal;
+        _list.Activate();
     }
 
     protected override void ExitThreadCore()
@@ -62,6 +89,7 @@ internal sealed class TrayApplication : ApplicationContext
     {
         if (disposing)
         {
+            _list?.Dispose();
             StopController();
             _icon.Dispose();
             _windows.Dispose();
@@ -97,7 +125,7 @@ internal sealed class TrayApplication : ApplicationContext
     }
 
     private static string Names(IEnumerable<TrackedWindow> windows) =>
-        string.Join("\n", windows.Select(t => t.Game.DisplayName ?? t.Game.ExePath));
+        string.Join("\n", windows.Select(t => t.Game.Name));
 
     private void Crash(Exception? exception)
     {
