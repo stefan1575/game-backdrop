@@ -20,7 +20,9 @@ internal static class Program
 
         using var tray = new TrayApplication(new SettingsStore(settingsPath));
         // The tray app installed the UI thread's context; a second launch is answered on it.
-        instance.OnSecondLaunch(SynchronizationContext.Current!, tray.ShowList);
+        // Declared after the tray, so it stops (and waits out a signal in flight) before the tray
+        // and its context are disposed.
+        using var secondLaunches = instance.OnSecondLaunch(SynchronizationContext.Current!, tray.ShowList);
         Application.Run(tray);
         return 0;
     }

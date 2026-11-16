@@ -13,7 +13,6 @@ internal sealed class SingleInstance : IDisposable
 
     private readonly EventWaitHandle _openList;
     private readonly Mutex _mutex;
-    private RegisteredWaitHandle? _wait;
 
     private SingleInstance(EventWaitHandle openList, Mutex mutex)
     {
@@ -42,18 +41,36 @@ internal sealed class SingleInstance : IDisposable
         return null;
     }
 
-    /// <summary>Run <paramref name="openList"/> on <paramref name="context"/> each time the app is launched again.</summary>
-    public void OnSecondLaunch(SynchronizationContext context, Action openList)
+    /// <summary>
+    /// Run <paramref name="openList"/> on <paramref name="context"/> each time the app is launched
+    /// again, until the returned registration is disposed. Dispose it before the context's UI goes:
+    /// disposal waits for a signal being handled, so none is posted to a torn-down context.
+    /// </summary>
+    public IDisposable OnSecondLaunch(SynchronizationContext context, Action openList)
     {
-        _wait = ThreadPool.RegisterWaitForSingleObject(_openList,
+        var wait = ThreadPool.RegisterWaitForSingleObject(_openList,
             (_, _) => context.Post(_ => openList(), null), null, Timeout.Infinite, executeOnlyOnce: false);
+        return new Listening(wait);
     }
 
     public void Dispose()
     {
-        _wait?.Unregister(null);
         _openList.Dispose();
         _mutex.Dispose();
+    }
+
+    private sealed class Listening(RegisteredWaitHandle wait) : IDisposable
+    {
+        private bool _disposed;
+
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+            // Unregister signals once no callback is running; the callback only posts, so this is short.
+            using var done = new ManualResetEvent(false);
+            if (wait.Unregister(done)) done.WaitOne();
+        }
     }
 
     private const uint ASFW_ANY = unchecked((uint)-1);
