@@ -3,9 +3,17 @@ using System.Text.Json.Serialization;
 
 namespace GameBackdrop.Core.Settings;
 
-/// <summary>The settings file: the game list, plus any fields this version doesn't know (kept as they are).</summary>
+/// <summary>The settings file: the game list, the hotkey, plus any fields this version doesn't know (kept as they are).</summary>
 public sealed class AppSettings
 {
+    /// <summary>
+    /// The hotkey that toggles the backdrop for the game in front, written as
+    /// <see cref="Settings.Hotkey.TryParse"/> reads it. Null means the default, Ctrl+Alt+B; it is
+    /// kept as written, so a save never rewrites what Stefan typed.
+    /// </summary>
+    [JsonPropertyName("hotkey")]
+    public string? Hotkey { get; set; }
+
     [JsonPropertyName("games")]
     public List<GameEntry> Games { get; set; } = [];
 
