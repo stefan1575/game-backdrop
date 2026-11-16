@@ -15,6 +15,8 @@ namespace GameBackdrop;
 internal sealed class TrayApplication : ApplicationContext
 {
     private const int ErrorCancelled = 1223; // ShellExecute: the UAC prompt was declined
+    private const int RestoreRetries = 3;
+    private const int RestoreRetryDelay = 200; // ms
 
     private static readonly bool Elevated = Environment.IsPrivilegedProcess;
 
@@ -102,14 +104,34 @@ internal sealed class TrayApplication : ApplicationContext
     }
 
     /// <summary>
-    /// Start an elevated copy (the UAC prompt) and quit, putting every game back. The new copy is
-    /// told to take over: it waits for this one to release the single-instance guard, which this
-    /// one does only after its games are back, so the two never both act on a window. A declined
-    /// prompt leaves this copy running as it was.
+    /// Put every game back, then start an elevated copy (the UAC prompt) and quit. The new copy
+    /// saves each window as it finds it as the original, so it is started only once every game is
+    /// back; it is told to take over, and waits for this one to release the single-instance
+    /// guard, so the two never both act on a window. A game that can't be put back, or a declined
+    /// prompt, leaves this copy running, with its games changed again.
     /// </summary>
     private void RestartAsAdministrator()
     {
         if (_restarting || Elevated) return;
+        _restarting = true;
+        var result = _controller.HandOver(StartElevatedCopy, RestoreRetries, () => Thread.Sleep(RestoreRetryDelay));
+        if (result.HandedOver)
+        {
+            ExitThread();
+            return;
+        }
+        _restarting = false;
+        if (result.NotRestored.Count > 0)
+        {
+            ShowBalloon(10000, "Couldn't restart as administrator",
+                $"These game windows couldn't be put back first, so Game Backdrop carries on as it was:\n{Names(result.NotRestored)}",
+                ToolTipIcon.Warning);
+        }
+    }
+
+    /// <summary>Start the elevated copy that takes over. False if it didn't start (the UAC prompt was declined, or it failed).</summary>
+    private bool StartElevatedCopy()
+    {
         var start = new ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = true, Verb = "runas" };
         start.ArgumentList.Add(Program.TakeoverFlag);
         if (_settingsArgument is not null)
@@ -123,15 +145,14 @@ internal sealed class TrayApplication : ApplicationContext
         }
         catch (Win32Exception e) when (e.NativeErrorCode == ErrorCancelled)
         {
-            return;
+            return false;
         }
         catch (Win32Exception e)
         {
             ShowBalloon(5000, "Game Backdrop", $"Couldn't restart as administrator: {e.Message}", ToolTipIcon.Warning);
-            return;
+            return false;
         }
-        _restarting = true;
-        ExitThread();
+        return true;
     }
 
     protected override void ExitThreadCore()
@@ -171,9 +192,9 @@ internal sealed class TrayApplication : ApplicationContext
     private IReadOnlyList<TrackedWindow> StopAndRestore(bool retry)
     {
         var notRestored = _controller.Stop();
-        for (var attempt = 0; retry && attempt < 3 && notRestored.Count > 0; attempt++)
+        for (var attempt = 0; retry && attempt < RestoreRetries && notRestored.Count > 0; attempt++)
         {
-            Thread.Sleep(200);
+            Thread.Sleep(RestoreRetryDelay);
             notRestored = _controller.Stop();
         }
         return notRestored;

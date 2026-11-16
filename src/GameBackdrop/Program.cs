@@ -14,8 +14,8 @@ internal static class Program
     public const string TakeoverFlag = "--takeover";
 
     /// <summary>
-    /// How long a takeover waits. The copy quitting retries a failed restore for under a second,
-    /// but then shows a dialog naming the games it couldn't put back, which waits for Stefan.
+    /// How long a takeover waits. The copy quitting has put its games back before it starts this
+    /// one, so it normally lets go at once; the margin is for a slow quit on a busy PC.
     /// </summary>
     private static readonly TimeSpan TakeoverWait = TimeSpan.FromSeconds(60);
 
