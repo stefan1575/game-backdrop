@@ -109,6 +109,61 @@ public sealed class ListChangeTests
         Assert.Same(Assert.Single(_desktop.VisibleBackdropsOn(Primary)), _desktop.DirectlyBehind(game));
     }
 
+    /// <summary>A Dota process with a frameless splash in front (listed first) and its captioned main window.</summary>
+    private (FakeWindow Splash, FakeWindow Main) OpenDotaWithSplash()
+    {
+        var process = _desktop.StartProcess(Dota);
+        var splash = _desktop.OpenPopup(process, new Rect(100, 100, 500, 400));
+        var main = _desktop.OpenWindowed(process, new Size(800, 600), left: 50, top: 60);
+        return (splash, main);
+    }
+
+    private void AssertMainWindowChosen(FakeWindow splash, FakeWindow main)
+    {
+        Assert.Equal(main.Handle, Assert.Single(_controller.TrackedWindows).Window);
+        Assert.False(main.HasBorder);
+        Assert.Same(Assert.Single(_desktop.VisibleBackdropsOn(Primary)), _desktop.DirectlyBehind(main));
+        Assert.Equal(new WindowFrame(FakeWindowSystem.Popup, new Rect(100, 100, 500, 400)), new WindowFrame(splash.Style, splash.Outer));
+    }
+
+    [Fact]
+    public void A_game_added_while_running_gets_its_main_window_chosen_as_at_start()
+    {
+        StartController();
+        var (splash, main) = OpenDotaWithSplash();
+
+        ListChangesTo(Entry(Dota, "Dota 2"));
+
+        AssertMainWindowChosen(splash, main);
+    }
+
+    [Fact]
+    public void A_game_switched_back_on_gets_its_main_window_chosen_as_at_start()
+    {
+        StartController(Entry(Dota, "Dota 2", enabled: false));
+        var (splash, main) = OpenDotaWithSplash();
+
+        ListChangesTo(Entry(Dota, "Dota 2"));
+
+        AssertMainWindowChosen(splash, main);
+    }
+
+    [Fact]
+    public void A_game_kept_on_through_a_change_keeps_its_window_over_another_it_has_open()
+    {
+        StartController(Entry(Dota, "Dota 2"));
+        var game = OpenDota();
+        // A second, larger captioned window the controller never saw shown (a missed event).
+        var other = _desktop.OpenWindowed(game.Process, new Size(1024, 768), left: 300, top: 200, show: false);
+        other.IsVisible = true;
+
+        ListChangesTo(Entry(Dota, "Dota 2 Reborn"));
+
+        Assert.Equal(game.Handle, Assert.Single(_controller.TrackedWindows).Window);
+        Assert.False(game.HasBorder);
+        Assert.True(other.HasBorder);
+    }
+
     [Fact]
     public void A_running_game_added_to_the_list_gets_its_backdrop_at_once()
     {

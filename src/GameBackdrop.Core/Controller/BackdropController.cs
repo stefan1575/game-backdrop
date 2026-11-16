@@ -143,11 +143,15 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
             else Save(tracked with { Game = entry });
         }
         if (!_running) return;
+        // A game that kept its window through this change keeps that window: none of its other
+        // windows takes over, as a later window would (a list change is no new window). A game
+        // tracked anew here (added, or switched back on) chooses among its windows as at Start,
+        // so its main window wins over a splash listed before it.
+        var kept = _tracked.Values.Where(t => t.State != TrackedState.RestorePending).Select(t => t.ProcessId).ToHashSet();
         foreach (var window in windows.TopLevelWindows())
         {
-            // A window already tracked keeps what it has; nor does one of a game already tracked
-            // take over from its window, as a later window would (a list change is no new window).
-            if (!_tracked.ContainsKey(window)) Consider(window, mayReplace: false);
+            // A window already tracked keeps what it has.
+            if (!_tracked.ContainsKey(window)) Consider(window, keptProcesses: kept);
         }
     }
 
@@ -207,9 +211,10 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
         windows.Activate(tracked.Window);
     }
 
-    /// <param name="mayReplace">Whether this window may take over from a window of the same game
-    /// already tracked (a launcher or splash screen), by <see cref="Replaces"/>.</param>
-    private void Consider(WindowHandle handle, bool mayReplace = true)
+    /// <param name="keptProcesses">Processes whose tracked window this window may not take over
+    /// from; any other process's tracked window (a launcher or splash screen) it may, by
+    /// <see cref="Replaces"/>. Null: none are kept.</param>
+    private void Consider(WindowHandle handle, IReadOnlySet<int>? keptProcesses = null)
     {
         if (TryGetLive(handle, out var known, out var live))
         {
@@ -229,7 +234,7 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
         var current = _tracked.Values.FirstOrDefault(t => t.ProcessId == info.ProcessId && t.State != TrackedState.RestorePending);
         if (current is not null)
         {
-            if (!mayReplace || !Replaces(info, current)) return;
+            if (keptProcesses?.Contains(info.ProcessId) == true || !Replaces(info, current)) return;
             current = DropBackdrop(current);
             var left = TryRestore(current);
             if (left is null) _tracked.Remove(current.Window);
