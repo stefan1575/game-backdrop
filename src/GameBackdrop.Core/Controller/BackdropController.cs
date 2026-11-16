@@ -10,7 +10,12 @@ namespace GameBackdrop.Core.Controller;
 /// <summary>What the controller has done to a tracked game window.</summary>
 public enum TrackedState
 {
-    /// <summary>The window fills its monitor: the game's own mode wins and nothing was changed.</summary>
+    /// <summary>
+    /// The window fills its monitor: the game's own mode wins. Either nothing was changed, or the
+    /// game was restyled and then switched to fullscreen itself, which released it: its backdrop
+    /// is gone and its frame is the game's own, but <see cref="TrackedWindow.Original"/> is kept
+    /// for when it goes windowed again.
+    /// </summary>
     Fullscreen,
     /// <summary>
     /// The window was made borderless and centred (or half-changed by a failed attempt);
@@ -32,13 +37,23 @@ public enum TrackedState
 /// (<see cref="WindowInfo.Lifetime"/>): a handle can be reused once its window is destroyed, even
 /// by a new window of the same game, so the controller checks the lifetime before every call on
 /// the handle. A window that changes its own frame keeps its lifetime, and its original.</param>
-/// <param name="Original">The window's frame before the controller first touched it.</param>
+/// <param name="Original">The window's frame before the controller first touched it (until then,
+/// the frame it had when first seen).</param>
 /// <param name="HadCaption">Whether the window had a title bar when it was first seen.</param>
+/// <param name="ClientSize">The window's client size as the controller last left it or found it: a
+/// different one means the game changed its window (a resolution change).</param>
 /// <param name="Monitor">The monitor the game is on, as the controller last placed it.</param>
 /// <param name="Backdrop">The black window behind a restyled game; null once it is destroyed.</param>
 /// <param name="MarkedFullscreen">The shell has been told the game is fullscreen (and not yet told
 /// otherwise), so the taskbar drops behind it while it is in front.</param>
 /// <param name="FrameRestored">The original frame is back; only the unmark is left to retry.</param>
+/// <param name="KnownStyle">The window's styles as the controller last left them or found them,
+/// with <paramref name="ClientSize"/>: different ones mean the game changed its window.</param>
+/// <param name="EverRestyled">The controller has changed the window's frame at least once, so
+/// <paramref name="Original"/> is what it puts back.</param>
+/// <param name="LastPlaced">When the controller last set the window's frame.</param>
+/// <param name="Fights">How many times in a row the game changed its window again soon after the
+/// controller placed it, and the controller placed it once more.</param>
 public sealed record TrackedWindow(
     WindowHandle Window,
     int ProcessId,
@@ -52,7 +67,11 @@ public sealed record TrackedWindow(
     MonitorInfo Monitor,
     BackdropHandle? Backdrop = null,
     bool MarkedFullscreen = false,
-    bool FrameRestored = false);
+    bool FrameRestored = false,
+    WindowStyle KnownStyle = default,
+    bool EverRestyled = false,
+    DateTimeOffset LastPlaced = default,
+    int Fights = 0);
 
 /// <summary>
 /// Turns window events into actions on the window system: a state machine per tracked game
@@ -66,8 +85,22 @@ public sealed record TrackedWindow(
 /// comes right after a fresh <see cref="IWindowSystem.Describe"/> of that handle that confirms the
 /// lifetime the controller means to act on, with no other port call in between.
 /// </remarks>
-public sealed class BackdropController(IWindowSystem windows, GameList games)
+public sealed class BackdropController(IWindowSystem windows, GameList games, TimeProvider? time = null)
 {
+    /// <summary>
+    /// A change the game makes to its window this soon after the controller placed it counts as
+    /// the game answering the controller (<see cref="TrackedWindow.Fights"/>).
+    /// </summary>
+    public static readonly TimeSpan FightWindow = TimeSpan.FromSeconds(1);
+
+    /// <summary>
+    /// How many times in a row the controller places a window the game keeps changing back. After
+    /// that the game wins: its window stays as the game set it, until it changes again after a
+    /// quiet <see cref="FightWindow"/>.
+    /// </summary>
+    public const int MaxFights = 3;
+
+    private readonly TimeProvider _time = time ?? TimeProvider.System;
     private readonly Dictionary<WindowHandle, TrackedWindow> _tracked = [];
     private bool _running;
 
@@ -142,6 +175,11 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
         if (!TryGetLive(e.Window, out var tracked, out var info)) return;
         // An event about an earlier window behind this handle, posted before it was destroyed.
         if (e.Lifetime != 0 && e.Lifetime != tracked.Lifetime) return;
+        if (e.Kind == WindowEventKind.LocationChanged)
+        {
+            Reassess(tracked, info);
+            return;
+        }
         if (tracked.Backdrop is not { } backdrop) return;
         switch (e.Kind)
         {
@@ -155,9 +193,6 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
             case WindowEventKind.MinimizeStart:
             case WindowEventKind.Hidden:
                 windows.HideBackdrop(backdrop);
-                break;
-            case WindowEventKind.LocationChanged:
-                FollowToMonitor(tracked, info);
                 break;
         }
     }
@@ -249,19 +284,36 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
     private void Track(WindowInfo info, GameEntry game)
     {
         var tracked = new TrackedWindow(info.Handle, info.ProcessId, info.ProcessPath, game, TrackedState.Fullscreen,
-            info.Lifetime, info.Frame, info.Style.HasCaption, info.Client.Size, info.Monitor);
-        if (WindowClassifier.Classify(info.Client, info.Style.HasCaption, info.Monitor.Bounds) != WindowMode.Windowed)
+            info.Lifetime, info.Frame, info.Style.HasCaption, info.Client.Size, info.Monitor, KnownStyle: info.Style);
+        if (Classify(info) != WindowMode.Windowed)
         {
             Save(tracked);
             return;
         }
+        Restyle(tracked, info);
+    }
+
+    private static WindowMode Classify(WindowInfo info) =>
+        WindowClassifier.Classify(info.Client, info.Style.HasCaption, info.Monitor.Bounds);
+
+    /// <summary>
+    /// Make a windowed game borderless, centre it on its monitor and give it its backdrop: a new
+    /// window, or a tracked one that left fullscreen. <paramref name="info"/> is a Describe of it
+    /// with no port call since.
+    /// </summary>
+    private void Restyle(TrackedWindow tracked, WindowInfo info)
+    {
+        // A window changed for the first time now: what it looks like now is what goes back. One
+        // changed before (and released when it went fullscreen) keeps the frame from before the
+        // first change.
+        if (!tracked.EverRestyled) tracked = tracked with { Original = info.Frame };
 
         // The client area keeps its size; whatever non-client part survives the restyle (a
         // menu bar) is added on, and the whole window is centred.
         var style = info.Style.Borderless();
         var outerSize = windows.OuterSizeFor(info.Handle, style, info.Client.Size);
         // Nothing is changed yet, so a window gone during OuterSizeFor is simply not tracked.
-        if (DescribeIfStill(info.Handle, info.Lifetime) is null) return;
+        if (StillLive(tracked) is null) return;
         var result = windows.SetFrame(info.Handle, new WindowFrame(style, Placement.Centre(outerSize, info.Monitor.Bounds)));
         switch (result)
         {
@@ -270,21 +322,32 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
                 return;
             case ChangeResult.WindowGone:
             case ChangeResult.Failed:
-                // Nothing was changed; a later Shown event gets another try.
+                // Nothing was changed; a later Shown event (or, for a tracked window, its next
+                // change) gets another try.
                 return;
         }
 
         // Changed, or half-changed, so it has to be put back: the record is kept from here on,
         // and brought up to date after each step, so that if a later step throws, the crash
         // handler's Stop still puts the window back and destroys whatever backdrop was made.
-        tracked = Save(tracked with { State = TrackedState.Restyled });
+        tracked = Save(tracked with { State = TrackedState.Restyled, EverRestyled = true, LastPlaced = _time.GetUtcNow() });
         // Each StillLive returning null means the window is gone: nothing to put back.
         if (StillLive(tracked) is not { } after) return;
         if (result == ChangeResult.Ok && after.Client.Size != info.Client.Size)
+        {
             CorrectClientSize(info, style, outerSize, after); // same monitor: it centres on the one before
-        tracked = Save(tracked with { Monitor = after.Monitor });
+            if (StillLive(tracked) is not { } corrected) return;
+            after = corrected;
+        }
+        // The record holds the window as the controller left it, so the events about this
+        // change find nothing to do.
+        tracked = Save(Known(tracked, after));
         GiveBackdrop(tracked);
     }
+
+    /// <summary>The record with the window's frame as it is now: what the controller left, or found.</summary>
+    private static TrackedWindow Known(TrackedWindow tracked, WindowInfo now) =>
+        tracked with { ClientSize = now.Client.Size, KnownStyle = now.Style, Monitor = now.Monitor };
 
     /// <summary>
     /// Give a restyled game its backdrop over its monitor, directly behind it, and tell the shell
@@ -329,16 +392,105 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
     }
 
     /// <summary>
-    /// The game moved to another monitor: centre it there and move its backdrop with it. A move
-    /// within its monitor (the controller's own placement included) changes nothing.
+    /// The window moved or changed its size or style: follow what the game did. A tracked game
+    /// that went windowed is restyled; a restyled one is centred again when the game changed its
+    /// window, or released when it went fullscreen.
     /// </summary>
-    private void FollowToMonitor(TrackedWindow tracked, WindowInfo info)
+    private void Reassess(TrackedWindow tracked, WindowInfo info)
     {
-        if (!info.IsVisible || info.IsMinimized || info.Monitor == tracked.Monitor) return;
-        windows.SetFrame(tracked.Window, new WindowFrame(info.Style, Placement.Centre(info.Outer.Size, info.Monitor.Bounds)));
-        tracked = Save(tracked with { Monitor = info.Monitor });
-        if (StillLive(tracked) is not { } moved) return;
-        ShowBackdrop(tracked, moved);
+        if (!info.IsVisible || info.IsMinimized) return;
+        switch (tracked.State)
+        {
+            case TrackedState.Fullscreen:
+                if (Classify(info) == WindowMode.Windowed) Restyle(tracked, info);
+                return;
+            case TrackedState.Restyled:
+                FollowRestyled(tracked, info);
+                return;
+        }
+    }
+
+    /// <summary>
+    /// A restyled game's window changed. With the styles and client size the controller left it
+    /// with, it only follows the game to another monitor: a move within its monitor (the
+    /// controller's own placement included) changes nothing, so the controller's own changes
+    /// never set off another. Changed by the game, it is released if it now fills its monitor,
+    /// else stripped and centred again at its new client size, unless the game keeps undoing that.
+    /// </summary>
+    private void FollowRestyled(TrackedWindow tracked, WindowInfo info)
+    {
+        var changedByGame = info.Style != tracked.KnownStyle || info.Client.Size != tracked.ClientSize;
+        if (!changedByGame)
+        {
+            if (info.Monitor != tracked.Monitor) Place(tracked, info);
+            return;
+        }
+        // Only a change by the game counts: a captioned game whose client area is its monitor's
+        // size fills its monitor once the controller strips it, and stays windowed.
+        if (Classify(info) == WindowMode.Fullscreen)
+        {
+            Release(tracked, info);
+            return;
+        }
+
+        var answering = _time.GetUtcNow() - tracked.LastPlaced < FightWindow;
+        var fights = answering ? tracked.Fights + 1 : 1;
+        if (fights > MaxFights)
+        {
+            // The game keeps changing its window back: it wins, and is left as it set itself.
+            Save(Known(tracked, info));
+            return;
+        }
+        Place(tracked with { Fights = fights }, info);
+    }
+
+    /// <summary>
+    /// Strip the window again if the game gave it back a border, and centre it at its own size on
+    /// the monitor it is on now; the backdrop follows it there. <paramref name="info"/> is a
+    /// Describe of it with no port call since.
+    /// </summary>
+    private void Place(TrackedWindow tracked, WindowInfo info)
+    {
+        var style = info.Style.Borderless();
+        var outerSize = style == info.Style ? info.Outer.Size : windows.OuterSizeFor(info.Handle, style, info.Client.Size);
+        var target = Placement.Centre(outerSize, info.Monitor.Bounds);
+        if (style == info.Style && target == info.Outer)
+        {
+            // Already where it goes (a game that resized about its centre), on the same monitor.
+            Save(Known(tracked, info));
+            return;
+        }
+        if (StillLive(tracked) is null) return;
+        var result = windows.SetFrame(info.Handle, new WindowFrame(style, target));
+        tracked = Save(tracked with { LastPlaced = _time.GetUtcNow() });
+        if (StillLive(tracked) is not { } after) return;
+        if (result == ChangeResult.Ok && style != info.Style && after.Client.Size != info.Client.Size)
+        {
+            CorrectClientSize(info, style, outerSize, after);
+            if (StillLive(tracked) is not { } corrected) return;
+            after = corrected;
+        }
+        // Whatever happened, the record now holds the window as it is, so the events about this
+        // change find nothing to do.
+        var moved = after.Monitor != tracked.Monitor;
+        tracked = Save(Known(tracked, after));
+        if (moved) ShowBackdrop(tracked, after);
+    }
+
+    /// <summary>
+    /// A restyled game switched itself to fullscreen (exclusive or borderless): the game's own
+    /// mode wins. Its backdrop goes, and the fullscreen mark the app gave it is taken back. Its
+    /// frame is the game's own now and is left as the game set it: putting the saved title bar
+    /// back would knock it out of fullscreen, and its next change would restyle it again. Its
+    /// original is kept for when it goes windowed again.
+    /// </summary>
+    private void Release(TrackedWindow tracked, WindowInfo info)
+    {
+        tracked = DropBackdrop(tracked);
+        tracked = Save(Known(tracked, info) with { State = TrackedState.Fullscreen, Fights = 0 });
+        if (!tracked.MarkedFullscreen || StillLive(tracked) is null) return;
+        if (windows.MarkFullscreen(tracked.Window, false) is ChangeResult.Ok or ChangeResult.WindowGone)
+            Save(tracked with { MarkedFullscreen = false });
     }
 
     /// <summary>
@@ -360,13 +512,16 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
     /// </summary>
     private TrackedWindow? TryRestore(TrackedWindow tracked)
     {
-        if (tracked.State is not (TrackedState.Restyled or TrackedState.RestorePending)) return null;
+        // A released game (fullscreen by its own choice) keeps the frame the game gave it; only a
+        // mark the app couldn't take back is left to retry.
+        var restoresFrame = tracked.State is TrackedState.Restyled or TrackedState.RestorePending;
+        if (!restoresFrame && !tracked.MarkedFullscreen) return null;
         // A window that has gone needs nothing back, and its handle may now be another window
         // (another program's, or a new one of the same game): Describe's lifetime is current.
         // The window can also go while SetFrame runs, so the check runs again before the unmark.
         // (Not StillLive: the callers decide what becomes of the record.)
         if (!IsLive(tracked)) return null;
-        if (!tracked.FrameRestored)
+        if (restoresFrame && !tracked.FrameRestored)
         {
             var result = windows.SetFrame(tracked.Window, tracked.Original);
             if (result == ChangeResult.WindowGone) return null; // gone, so nothing to unmark either
@@ -378,7 +533,7 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
             if (windows.MarkFullscreen(tracked.Window, false) is ChangeResult.Ok or ChangeResult.WindowGone)
                 tracked = tracked with { MarkedFullscreen = false };
         }
-        return tracked.FrameRestored && !tracked.MarkedFullscreen ? null : tracked;
+        return (tracked.FrameRestored || !restoresFrame) && !tracked.MarkedFullscreen ? null : tracked;
     }
 
     /// <summary>Destroy the window's backdrop, if it has one, and keep the record without it.</summary>
