@@ -145,6 +145,67 @@ public sealed class HandOverTests
     }
 
     [Fact]
+    public void A_game_whose_unmark_fails_throughout_is_changed_again_and_blacked_out_when_this_copy_carries_on()
+    {
+        var controller = StartController();
+        var dota = _desktop.OpenWindowed(_desktop.StartProcess(Dota), new Size(800, 600), left: 50, top: 60);
+        // The shell refuses the unmark on Stop, its three retries and Start, and the mark that follows.
+        _desktop.FailNextMarks(dota, 6);
+
+        var result = controller.HandOver(() => true, retries: 3);
+
+        Assert.False(result.HandedOver);
+        Assert.False(dota.HasBorder);
+        Assert.Equal(new Rect(560, 240, 1360, 840), dota.Outer);
+        Assert.Single(_desktop.VisibleBackdropsOn(FakeWindowSystem.Primary));
+        // The shell has recovered: the game is marked again when it comes to the front, and its
+        // backdrop follows it through a minimise.
+        _desktop.UserActivates(dota);
+        _desktop.Minimise(dota);
+        _desktop.Restore(dota);
+        AssertRestyledWithBackdrop(dota);
+        Assert.Empty(controller.Stop());
+        AssertUntouched(dota, DotaOriginal);
+        Assert.False(dota.IsMarkedFullscreen);
+    }
+
+    [Fact]
+    public void A_game_half_put_back_gets_its_whole_frame_again_when_this_copy_carries_on()
+    {
+        var controller = StartController();
+        var dota = _desktop.OpenWindowed(_desktop.StartProcess(Dota), new Size(800, 600), left: 50, top: 60);
+        // Each restore gives back the title bar but not the outer rectangle.
+        _desktop.FailNextChanges(dota, ChangeResult.PartlyChanged, ChangeResult.PartlyChanged, ChangeResult.PartlyChanged, ChangeResult.PartlyChanged);
+
+        var result = controller.HandOver(() => true, retries: 3);
+
+        Assert.False(result.HandedOver);
+        AssertRestyledWithBackdrop(dota);
+        Assert.Equal(new Size(800, 600), dota.Client.Size);
+        Assert.Empty(controller.Stop());
+        AssertUntouched(dota, DotaOriginal);
+    }
+
+    [Fact]
+    public void A_game_left_minimised_by_a_failed_hand_over_is_changed_again_when_it_is_restored()
+    {
+        var controller = StartController();
+        var dota = _desktop.OpenWindowed(_desktop.StartProcess(Dota), new Size(800, 600), left: 50, top: 60);
+        // Its frame comes back but the unmark fails on Stop, the retry and Start; the user
+        // minimises the game meanwhile, so carrying on can't change it yet.
+        _desktop.FailNextMarks(dota, 3);
+
+        var result = controller.HandOver(() => true, retries: 1, beforeRetry: () => _desktop.Minimise(dota));
+
+        Assert.False(result.HandedOver);
+        _desktop.Restore(dota);
+        AssertRestyledWithBackdrop(dota);
+        Assert.Empty(controller.Stop());
+        AssertUntouched(dota, DotaOriginal);
+        Assert.False(dota.IsMarkedFullscreen);
+    }
+
+    [Fact]
     public void The_administrator_notice_is_not_raised_again_when_this_copy_carries_on()
     {
         var controller = StartController();

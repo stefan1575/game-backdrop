@@ -90,9 +90,8 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
 
     /// <summary>
     /// Start watching, and handle the listed games that are already running. After a
-    /// <see cref="Stop"/> that couldn't put a game back, starting again picks that game up where
-    /// it was: still changed, it gets its backdrop again; back but still marked fullscreen, the
-    /// unmark is retried and the game is handled afresh.
+    /// <see cref="Stop"/> that couldn't put a game back, starting again changes that game again,
+    /// keeping its first original (<see cref="Resume"/>).
     /// </summary>
     public void Start()
     {
@@ -184,7 +183,15 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
         if (!TryGetLive(e.Window, out var tracked, out var info)) return;
         // An event about an earlier window behind this handle, posted before it was destroyed.
         if (e.Lifetime != 0 && e.Lifetime != tracked.Lifetime) return;
-        if (tracked.Backdrop is not { } backdrop) return;
+        if (tracked.Backdrop is not { } backdrop)
+        {
+            // Left by a Stop that couldn't finish, and not changed again yet (it was minimised,
+            // or the change failed): coming back on screen is the next chance.
+            if (IsLeftByStop(tracked) && e.Kind is WindowEventKind.Foreground or WindowEventKind.MinimizeEnd
+                && !Resume(tracked, info))
+                Consider(e.Window); // fully back and forgotten: decided on afresh
+            return;
+        }
         switch (e.Kind)
         {
             case WindowEventKind.Foreground:
@@ -216,24 +223,11 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
     {
         if (TryGetLive(handle, out var known, out var live))
         {
-            if (known is { State: TrackedState.Restyled, Backdrop: null })
+            if (IsLeftByStop(known))
             {
-                // Left by a restore that didn't finish (a Stop, then Start again).
-                if (!known.FrameRestored)
-                {
-                    // Still changed: it keeps its first original and gets its backdrop back.
-                    GiveBackdrop(known);
-                    return;
-                }
-                // Back as it was; only the unmark is left. Once that is done the window is
-                // unchanged and untracked, so it is decided on afresh below.
-                var left = TryRestore(known);
-                if (left is not null)
-                {
-                    Save(left);
-                    return;
-                }
-                Forget(known);
+                if (Resume(known, live)) return;
+                // It was back as it was, and now its unmark is done too: unchanged and untracked,
+                // so it is decided on afresh below.
             }
             else
             {
@@ -266,6 +260,53 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
         }
 
         Track(info, game);
+    }
+
+    /// <summary>
+    /// A restyled window that a <see cref="Stop"/> couldn't finish putting back, then
+    /// <see cref="Start"/> again: only that leaves a restyled window without its backdrop.
+    /// </summary>
+    private static bool IsLeftByStop(TrackedWindow tracked) => tracked is { State: TrackedState.Restyled, Backdrop: null };
+
+    /// <summary>
+    /// Carry on with a window a <see cref="Stop"/> left part-way back (<see cref="IsLeftByStop"/>).
+    /// The restore can have done anything from nothing to all but the unmark, and a half-done one
+    /// (<see cref="ChangeResult.PartlyChanged"/>) can leave the title bar back on the borderless
+    /// rectangle. So the window gets its whole changed frame again, worked out from its first
+    /// original, and its backdrop; it keeps that original, and any unmark still owed.
+    /// A window whose frame is back is unmarked again first: if that works nothing is owed, and
+    /// this returns false for the caller to decide on it afresh. A window that is off screen, or
+    /// now fills its screen of its own accord, or refuses the change, keeps its record as it is:
+    /// Stop still finishes putting it back, and its next Shown, Foreground or MinimizeEnd tries
+    /// again. Returns whether the window is still tracked by this record.
+    /// </summary>
+    private bool Resume(TrackedWindow tracked, WindowInfo live)
+    {
+        if (tracked.FrameRestored)
+        {
+            var left = TryRestore(tracked);
+            if (left is null)
+            {
+                Forget(tracked);
+                return false;
+            }
+            tracked = Save(left);
+            if (StillLive(tracked) is not { } now) return true;
+            live = now;
+            if (IsCandidate(live) && WindowClassifier.Classify(live.Client, live.Style.HasCaption, live.Monitor.Bounds) != WindowMode.Windowed)
+                return true;
+        }
+        if (!IsCandidate(live)) return true;
+
+        var style = tracked.Original.Style.Borderless();
+        var outerSize = windows.OuterSizeFor(tracked.Window, style, tracked.ClientSize);
+        if (StillLive(tracked) is not { } before) return true;
+        var result = windows.SetFrame(tracked.Window, new WindowFrame(style, Placement.Centre(outerSize, before.Monitor.Bounds)));
+        // Anything else changed nothing: the window stays as the restore left it.
+        if (result is not (ChangeResult.Ok or ChangeResult.PartlyChanged)) return true;
+        tracked = Save(tracked with { Monitor = before.Monitor, FrameRestored = false });
+        FinishRestyle(tracked, style, outerSize, result);
+        return true;
     }
 
     /// <summary>
@@ -343,10 +384,20 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
         // and brought up to date after each step, so that if a later step throws, the crash
         // handler's Stop still puts the window back and destroys whatever backdrop was made.
         tracked = Save(tracked with { State = TrackedState.Restyled });
+        FinishRestyle(tracked, style, outerSize, result);
+    }
+
+    /// <summary>
+    /// After the SetFrame that made a tracked window borderless and centred it on
+    /// <see cref="TrackedWindow.Monitor"/>: correct its client size if the port's outer size was
+    /// short, and give it its backdrop.
+    /// </summary>
+    private void FinishRestyle(TrackedWindow tracked, WindowStyle style, Size outerSize, ChangeResult result)
+    {
         // Each StillLive returning null means the window is gone: nothing to put back.
         if (StillLive(tracked) is not { } after) return;
-        if (result == ChangeResult.Ok && after.Client.Size != info.Client.Size)
-            CorrectClientSize(info, style, outerSize, after); // same monitor: it centres on the one before
+        if (result == ChangeResult.Ok && after.Client.Size != tracked.ClientSize)
+            CorrectClientSize(tracked, style, outerSize, after); // same monitor: it centres on the one before
         tracked = Save(tracked with { Monitor = after.Monitor });
         GiveBackdrop(tracked);
     }
@@ -411,12 +462,12 @@ public sealed class BackdropController(IWindowSystem windows, GameList games)
     /// than the port predicts. Grow the window by what the client area lost, measured, and centre
     /// it again. If that fails the window stays restyled and is still put back on quit.
     /// </summary>
-    private void CorrectClientSize(WindowInfo before, WindowStyle style, Size outerSize, WindowInfo after)
+    private void CorrectClientSize(TrackedWindow tracked, WindowStyle style, Size outerSize, WindowInfo after)
     {
         var corrected = new Size(
-            outerSize.Width + before.Client.Width - after.Client.Width,
-            outerSize.Height + before.Client.Height - after.Client.Height);
-        windows.SetFrame(before.Handle, new WindowFrame(style, Placement.Centre(corrected, before.Monitor.Bounds)));
+            outerSize.Width + tracked.ClientSize.Width - after.Client.Width,
+            outerSize.Height + tracked.ClientSize.Height - after.Client.Height);
+        windows.SetFrame(tracked.Window, new WindowFrame(style, Placement.Centre(corrected, tracked.Monitor.Bounds)));
     }
 
     /// <summary>
