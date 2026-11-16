@@ -522,6 +522,20 @@ public sealed class LiveChangeTests
         Assert.Empty(_desktop.Backdrops);
     }
 
+    [Fact]
+    public void A_game_replaced_while_its_own_style_is_put_back_leaves_the_newcomer_alone()
+    {
+        var controller = StartController();
+        var game = OpenThickPopupGame();
+        var newcomer = ReplaceDuringNext(PortCall.OuterSizeFor, game, markedFullscreen: true);
+
+        _desktop.SetOwnFrame(game, game.Style, Primary.Bounds);
+
+        AssertNewcomerKeptAsItWas(newcomer(), markedFullscreen: true);
+        Assert.Empty(newcomer().PortChanges);
+        Assert.Empty(controller.TrackedWindows);
+    }
+
     private Func<FakeWindow> ReplaceDuringNext(PortCall call, FakeWindow game, bool markedFullscreen = false)
     {
         FakeWindow? newcomer = null;
