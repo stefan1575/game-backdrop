@@ -15,9 +15,24 @@ public sealed class StartAtLogon(SettingsStore store, IStartupShortcut shortcut)
 
     /// <summary>
     /// Whether the choice can be recorded: false while the settings file can't be read, which is
-    /// left alone rather than overwritten.
+    /// left alone rather than overwritten. That covers a file that isn't valid settings and one
+    /// that can't be opened right now (another program holds it, or access is denied); this
+    /// never throws for either, since the tray asks every time its menu opens.
     /// </summary>
-    public bool CanRecord => store.Load().Status != SettingsLoadStatus.Corrupt;
+    public bool CanRecord
+    {
+        get
+        {
+            try
+            {
+                return store.Load().Status != SettingsLoadStatus.Corrupt;
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                return false;
+            }
+        }
+    }
 
     /// <summary>
     /// At app start. Recorded on, or nothing recorded yet: create the shortcut (replacing any old

@@ -58,6 +58,28 @@ public sealed class StartAtLogonTests : IDisposable
     }
 
     [Fact]
+    public void A_settings_file_another_program_holds_open_cant_be_recorded_rather_than_throwing()
+    {
+        NewRun().ApplyAtStart();
+        var run = NewRun();
+
+        using (new FileStream(Store.FilePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            Assert.False(run.CanRecord);
+        }
+        Assert.True(run.CanRecord);
+    }
+
+    [Fact]
+    public void A_settings_path_that_cant_be_read_for_access_reasons_cant_be_recorded_rather_than_throwing()
+    {
+        // Reading a folder as a file is refused as access denied, as an ACL denying read would be.
+        Directory.CreateDirectory(Store.FilePath);
+
+        Assert.False(NewRun().CanRecord);
+    }
+
+    [Fact]
     public void Turning_it_back_on_creates_the_shortcut_and_keeps_a_game_added_by_hand_meanwhile()
     {
         var run = NewRun();
