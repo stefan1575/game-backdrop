@@ -165,6 +165,56 @@ public sealed class ToggleTests
     }
 
     [Fact]
+    public void A_game_toggled_off_on_its_splash_stays_off_when_the_splash_closes_before_its_main_window_opens()
+    {
+        var controller = StartController();
+        var process = _desktop.StartProcess(Dota);
+        var splash = _desktop.OpenPopup(process, Rect.FromPosition(800, 400, new Size(320, 200)));
+        controller.ToggleBackdrop();
+
+        _desktop.Close(splash);
+        var main = _desktop.OpenWindowed(process, new Size(800, 600));
+
+        Assert.True(main.Style.HasCaption);
+        Assert.Empty(main.PortChanges);
+        Assert.Empty(_desktop.VisibleBackdropsOn(Primary));
+
+        controller.ToggleBackdrop();
+
+        AssertBackdropOn(main);
+    }
+
+    [Fact]
+    public void A_game_toggled_off_stays_off_when_it_closes_its_window_and_opens_a_new_one()
+    {
+        var controller = StartController();
+        var process = _desktop.StartProcess(Dota);
+        var first = _desktop.OpenWindowed(process, new Size(800, 600));
+        controller.ToggleBackdrop();
+
+        // A game that recreates its window (a renderer or resolution change) is still the same run.
+        _desktop.Close(first);
+        var second = _desktop.OpenWindowed(process, new Size(800, 600));
+
+        Assert.Empty(second.PortChanges);
+        Assert.Empty(_desktop.VisibleBackdropsOn(Primary));
+    }
+
+    [Fact]
+    public void A_game_toggled_off_gets_its_backdrop_again_when_relaunched_under_the_same_process_id()
+    {
+        var controller = StartController();
+        var first = OpenGame();
+        controller.ToggleBackdrop();
+
+        _desktop.Close(first);
+        var relaunched = _desktop.OpenWindowed(_desktop.StartProcess(Dota, reusingIdOf: first.Process), new Size(800, 600));
+
+        Assert.Equal(first.Process.Id, relaunched.Process.Id);
+        AssertBackdropOn(relaunched);
+    }
+
+    [Fact]
     public void The_toggle_acts_on_the_game_in_front_not_on_another_running_game()
     {
         var controller = StartController();

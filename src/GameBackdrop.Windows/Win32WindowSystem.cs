@@ -95,12 +95,14 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
         var monitorInfo = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
         if (!GetMonitorInfo(monitor, ref monitorInfo)) return null;
         if (!_lifetimes.TryGetValue(hwnd, out var lifetime)) _lifetimes[hwnd] = lifetime = _nextLifetime++;
+        var (processPath, processStarted) = ProcessDetails(processId);
 
         return new WindowInfo(
             window,
             lifetime,
             (int)processId,
-            ProcessPath(processId),
+            processPath,
+            processStarted,
             ToRect(outer),
             new Rect(origin.X, origin.Y, origin.X + client.Right, origin.Y + client.Bottom),
             style,
@@ -348,15 +350,21 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
         return error == 0;
     }
 
-    private static string? ProcessPath(uint processId)
+    /// <summary>
+    /// The process's exe path and start time (a FILETIME), each null or 0 when it can't be read.
+    /// Both are queries on a limited-information handle; nothing is read from the process.
+    /// </summary>
+    private static (string? Path, long Started) ProcessDetails(uint processId)
     {
         var process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, processId);
-        if (process == 0) return null;
+        if (process == 0) return (null, 0);
         try
         {
             var buffer = new StringBuilder(1024);
             var size = (uint)buffer.Capacity;
-            return QueryFullProcessImageName(process, 0, buffer, ref size) ? buffer.ToString() : null;
+            var path = QueryFullProcessImageName(process, 0, buffer, ref size) ? buffer.ToString() : null;
+            var started = GetProcessTimes(process, out var creation, out _, out _, out _) ? creation : 0;
+            return (path, started);
         }
         finally
         {

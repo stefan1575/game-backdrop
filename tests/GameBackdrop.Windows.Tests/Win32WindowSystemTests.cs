@@ -79,6 +79,16 @@ public sealed class Win32WindowSystemTests : IDisposable
     }
 
     [Fact]
+    public void A_window_is_described_with_its_process_s_id_path_and_start_time()
+    {
+        var info = _windows.Describe(new WindowHandle(_hwnd))!;
+
+        Assert.Equal(_testWindow.Id, info.ProcessId);
+        Assert.Equal(_testWindow.MainModule!.FileName, info.ProcessPath, ignoreCase: true);
+        Assert.Equal(_testWindow.StartTime.ToFileTimeUtc(), info.ProcessStarted);
+    }
+
+    [Fact]
     public void A_window_keeps_its_lifetime_when_it_changes_itself()
     {
         var handle = new WindowHandle(_hwnd);
