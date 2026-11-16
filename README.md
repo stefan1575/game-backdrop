@@ -12,7 +12,8 @@ nothing is injected into the game.
    artifact from the newest CI run on `main`:
 
    ```
-   gh run download --repo stefan1575/game-backdrop --branch main --name GameBackdrop
+   gh run list --repo stefan1575/game-backdrop --branch main --event push --status success --limit 1 --json databaseId --jq ".[0].databaseId"
+   gh run download <that id> --repo stefan1575/game-backdrop --name GameBackdrop
    ```
 
 2. Put it somewhere it will stay, e.g. `%LOCALAPPDATA%\Programs\GameBackdrop\GameBackdrop.exe`.
