@@ -30,4 +30,18 @@ public sealed class GameEntry
 
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? UnknownFields { get; set; }
+
+    /// <summary>The name to show: <see cref="DisplayName"/>, or the exe's file name without its extension.</summary>
+    [JsonIgnore]
+    public string Name => string.IsNullOrWhiteSpace(DisplayName) ? Path.GetFileNameWithoutExtension(ExePath) : DisplayName;
+
+    /// <summary>Whether this entry is for <paramref name="exePath"/>: the same full path, ignoring case and slash direction.</summary>
+    public bool IsFor(string? exePath) =>
+        !string.IsNullOrWhiteSpace(exePath) && !string.IsNullOrWhiteSpace(ExePath)
+        && string.Equals(Normalise(ExePath), Normalise(exePath), StringComparison.OrdinalIgnoreCase);
+
+    private static string Normalise(string path) => path.Trim().Replace('/', '\\');
+
+    /// <summary>A copy to change, so the original (perhaps held by the controller) stays as it is.</summary>
+    public GameEntry Copy() => (GameEntry)MemberwiseClone();
 }
