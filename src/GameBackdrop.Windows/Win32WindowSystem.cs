@@ -74,6 +74,12 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
         return handles;
     }
 
+    public WindowHandle? ForegroundWindow()
+    {
+        var hwnd = GetForegroundWindow();
+        return hwnd == 0 ? null : new WindowHandle(hwnd);
+    }
+
     public WindowInfo? Describe(WindowHandle window)
     {
         CatchUp();
@@ -224,6 +230,10 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
         if (SetForegroundWindow(window.Value)) return ChangeResult.Ok;
         return IsWindow(window.Value) ? ChangeResult.Failed : ChangeResult.WindowGone;
     }
+
+    public void ClipCursor(Rect area) => throw new NotImplementedException();
+
+    public void ReleaseCursor() => throw new NotImplementedException();
 
     /// <summary>
     /// Take in the window destructions the OS has already reported, so lifetimes are current.
