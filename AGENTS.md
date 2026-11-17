@@ -9,7 +9,8 @@ Windows only (Stefan, 2026-11-15): Linux was considered and dropped, because Way
 an outside app move another app's window, so a shared backend wouldn't come for free.
 
 **On GitHub as the private `stefan1575/game-backdrop`.** Commit after every completed step, with
-a message that says what changed and why. Every PR is reviewed by Sol (`~/Code/docs/pr-review.md`).
+a message that says what changed and why. The queue runner on Stefan's PC reviews every PR
+(`~/Code/Personal/queue-runner/docs/reviews.md`), and Stefan merges.
 
 ## Build and test
 
