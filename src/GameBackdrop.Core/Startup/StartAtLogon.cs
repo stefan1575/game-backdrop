@@ -3,15 +3,19 @@ using GameBackdrop.Core.Settings;
 namespace GameBackdrop.Core.Startup;
 
 /// <summary>
-/// The "Start at logon" choice: the Startup shortcut follows what the settings file records.
-/// Unrecorded (the first run) means on, so the first run creates the shortcut and records it;
-/// once "off" is recorded, no run creates it again. The settings file is read fresh for every
-/// change, so a hand edit made while the app runs isn't overwritten.
+/// The "Start at logon" choice: what starts the app at logon follows what the settings file
+/// records. That is the Startup shortcut, or, while the app always runs as administrator, a logon
+/// trigger on its scheduled task, with the shortcut removed so the app never starts twice.
+/// Unrecorded (the first run) means on, so the first run sets it up and records it; once "off" is
+/// recorded, no run sets it up again. The settings file is read fresh for every change, so a hand
+/// edit made while the app runs isn't overwritten.
 /// </summary>
-public sealed class StartAtLogon(SettingsStore store, IStartupShortcut shortcut)
+public sealed class StartAtLogon(SettingsStore store, IStartupShortcut shortcut, AdministratorTask? task = null)
 {
-    /// <summary>Whether the app will start at logon: the shortcut is there.</summary>
-    public bool IsOn => shortcut.Exists;
+    /// <summary>Whether the app will start at logon: the task's logon trigger, or else the shortcut.</summary>
+    public bool IsOn => TaskIsSetUp ? task!.StartsAtLogon : shortcut.Exists;
+
+    private bool TaskIsSetUp => task?.IsSetUp == true;
 
     /// <summary>
     /// Whether the choice can be recorded: false while the settings file can't be read, which is
@@ -35,25 +39,52 @@ public sealed class StartAtLogon(SettingsStore store, IStartupShortcut shortcut)
     }
 
     /// <summary>
-    /// At app start. Recorded on, or nothing recorded yet: create the shortcut (replacing any old
-    /// one, so it points at this exe even if the exe moved) and record on. Recorded off, or an
-    /// unreadable settings file: leave the shortcut alone. If the shortcut can't be created the
-    /// exception propagates and nothing is recorded, so the next start tries again.
+    /// Whether the settings ask for a start at logon: recorded on, or nothing recorded yet (the
+    /// first run turns it on). False for an unreadable settings file.
+    /// </summary>
+    public bool IsWanted
+    {
+        get
+        {
+            var loaded = store.Load();
+            return loaded.Status != SettingsLoadStatus.Corrupt && loaded.Settings.StartAtLogon != false;
+        }
+    }
+
+    /// <summary>
+    /// At app start. With the task set up: the shortcut is removed, and the task's logon trigger
+    /// follows the record (nothing recorded counts as on, and is recorded). Without it: recorded
+    /// on, or nothing recorded yet, creates the shortcut (replacing any old one, so it points at
+    /// this exe even if the exe moved) and records on; recorded off leaves the shortcut alone. An
+    /// unreadable settings file leaves everything alone. If the change can't be made the exception
+    /// propagates and nothing is recorded, so the next start tries again.
     /// </summary>
     public void ApplyAtStart()
     {
         var loaded = store.Load();
-        if (loaded.Status == SettingsLoadStatus.Corrupt || loaded.Settings.StartAtLogon == false) return;
+        if (loaded.Status == SettingsLoadStatus.Corrupt) return;
+        var wanted = loaded.Settings.StartAtLogon != false;
 
-        shortcut.Create();
-        if (loaded.Settings.StartAtLogon == true) return;
+        if (TaskIsSetUp)
+        {
+            if (task!.StartsAtLogon != wanted) task.Register(atLogon: wanted);
+            shortcut.Remove();
+        }
+        else
+        {
+            if (!wanted) return;
+            shortcut.Create();
+        }
+
+        if (loaded.Settings.StartAtLogon is not null) return;
         loaded.Settings.StartAtLogon = true;
         store.Save(loaded.Settings);
     }
 
     /// <summary>
     /// Turn it on or off and record the choice. Throws <see cref="InvalidOperationException"/>,
-    /// changing nothing, while the settings file can't be read.
+    /// changing nothing, while the settings file can't be read. With the task set up this changes
+    /// its logon trigger, which needs administrator.
     /// </summary>
     public void Set(bool on)
     {
@@ -61,7 +92,12 @@ public sealed class StartAtLogon(SettingsStore store, IStartupShortcut shortcut)
         if (loaded.Status == SettingsLoadStatus.Corrupt)
             throw new InvalidOperationException($"The settings file can't be read, so the choice can't be recorded: {store.FilePath}");
 
-        if (on) shortcut.Create();
+        if (TaskIsSetUp)
+        {
+            task!.Register(atLogon: on);
+            shortcut.Remove();
+        }
+        else if (on) shortcut.Create();
         else shortcut.Remove();
         loaded.Settings.StartAtLogon = on;
         store.Save(loaded.Settings);
