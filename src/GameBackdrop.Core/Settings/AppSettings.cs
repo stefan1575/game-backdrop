@@ -3,11 +3,27 @@ using System.Text.Json.Serialization;
 
 namespace GameBackdrop.Core.Settings;
 
-/// <summary>The settings file: the game list, plus any fields this version doesn't know (kept as they are).</summary>
+/// <summary>The settings file: the game list, the hotkey, plus any fields this version doesn't know (kept as they are).</summary>
 public sealed class AppSettings
 {
+    /// <summary>
+    /// The hotkey that toggles the backdrop for the game in front, written as
+    /// <see cref="Settings.Hotkey.TryParse"/> reads it. Null means the default, Ctrl+Alt+B; it is
+    /// kept as written, so a save never rewrites what the user typed.
+    /// </summary>
+    [JsonPropertyName("hotkey")]
+    public string? Hotkey { get; set; }
+
     [JsonPropertyName("games")]
     public List<GameEntry> Games { get; set; } = [];
+
+    /// <summary>
+    /// Whether the app starts at logon (a shortcut in the Startup folder). Null until the first
+    /// run records it on, so a later "off" sticks.
+    /// </summary>
+    [JsonPropertyName("startAtLogon")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? StartAtLogon { get; set; }
 
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? UnknownFields { get; set; }
@@ -30,4 +46,18 @@ public sealed class GameEntry
 
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? UnknownFields { get; set; }
+
+    /// <summary>The name to show: <see cref="DisplayName"/>, or the exe's file name without its extension.</summary>
+    [JsonIgnore]
+    public string Name => string.IsNullOrWhiteSpace(DisplayName) ? Path.GetFileNameWithoutExtension(ExePath) : DisplayName;
+
+    /// <summary>Whether this entry is for <paramref name="exePath"/>: the same full path, ignoring case and slash direction.</summary>
+    public bool IsFor(string? exePath) =>
+        !string.IsNullOrWhiteSpace(exePath) && !string.IsNullOrWhiteSpace(ExePath)
+        && string.Equals(Normalise(ExePath), Normalise(exePath), StringComparison.OrdinalIgnoreCase);
+
+    private static string Normalise(string path) => path.Trim().Replace('/', '\\');
+
+    /// <summary>A copy to change, so the original (perhaps held by the controller) stays as it is.</summary>
+    public GameEntry Copy() => (GameEntry)MemberwiseClone();
 }

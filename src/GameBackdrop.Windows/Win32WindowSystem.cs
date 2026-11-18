@@ -43,6 +43,9 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
     private static readonly ConcurrentDictionary<nint, Win32WindowSystem> BackdropOwners = new();
     private readonly HashSet<nint> _backdrops = [];
 
+    // The cursor clip this port last set, as Windows applied it; null when it set none, or freed it.
+    private RECT? _clipSet;
+
     // The shell's taskbar list, created on first use on this thread.
     private ITaskbarList2? _taskbar;
 
@@ -74,6 +77,12 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
         return handles;
     }
 
+    public WindowHandle? ForegroundWindow()
+    {
+        var hwnd = GetForegroundWindow();
+        return hwnd == 0 ? null : new WindowHandle(hwnd);
+    }
+
     public WindowInfo? Describe(WindowHandle window)
     {
         CatchUp();
@@ -89,14 +98,14 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
         var monitorInfo = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
         if (!GetMonitorInfo(monitor, ref monitorInfo)) return null;
         if (!_lifetimes.TryGetValue(hwnd, out var lifetime)) _lifetimes[hwnd] = lifetime = _nextLifetime++;
-        var (processStarted, processPath) = DescribeProcess(processId);
+        var (processPath, processStarted) = ProcessDetails(processId);
 
         return new WindowInfo(
             window,
             lifetime,
             (int)processId,
-            processStarted,
             processPath,
+            processStarted,
             ToRect(outer),
             new Rect(origin.X, origin.Y, origin.X + client.Right, origin.Y + client.Bottom),
             style,
@@ -227,6 +236,24 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
         return IsWindow(window.Value) ? ChangeResult.Failed : ChangeResult.WindowGone;
     }
 
+    public void ClipCursor(Rect area)
+    {
+        var rect = new RECT { Left = area.Left, Top = area.Top, Right = area.Right, Bottom = area.Bottom };
+        // Kept as Windows reports it back, trimmed to the screen, for ReleaseCursor to compare.
+        _clipSet = NativeMethods.ClipCursor(ref rect) && GetClipCursor(out var applied) ? applied : null;
+    }
+
+    public void ReleaseCursor()
+    {
+        var set = _clipSet;
+        _clipSet = null;
+        // A clip someone else set since (the game clipping the cursor itself, or Windows resetting
+        // it) isn't this port's to free.
+        if (set is { } mine && GetClipCursor(out var now) && SameRect(now, mine)) FreeCursor(0);
+    }
+
+    private static bool SameRect(RECT a, RECT b) => a.Left == b.Left && a.Top == b.Top && a.Right == b.Right && a.Bottom == b.Bottom;
+
     /// <summary>
     /// Take in the window destructions the OS has already reported, so lifetimes are current.
     /// Public for the native tests; <see cref="Describe"/> calls it first.
@@ -248,6 +275,8 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
     {
         foreach (var hook in _hooks) UnhookWinEvent(hook);
         _hooks.Clear();
+        // The controller frees the cursor when it stops; this is the backstop if it never did.
+        ReleaseCursor();
         foreach (var backdrop in _backdrops.ToList()) DestroyBackdrop(new BackdropHandle(backdrop));
         if (_taskbar is not null) Marshal.ReleaseComObject(_taskbar);
         _taskbar = null;
@@ -345,19 +374,20 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
     }
 
     /// <summary>
-    /// The process's start time (0 when unreadable) and exe path (null when unreadable). Limited
-    /// query access is all both need, and it is granted even on an elevated process.
+    /// The process's exe path and start time (a FILETIME), each null or 0 when it can't be read.
+    /// Both are queries on a limited-information handle; nothing is read from the process.
     /// </summary>
-    private static (long Started, string? Path) DescribeProcess(uint processId)
+    internal static (string? Path, long Started) ProcessDetails(uint processId)
     {
         var process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, processId);
-        if (process == 0) return (0, null);
+        if (process == 0) return (null, 0);
         try
         {
-            var started = GetProcessTimes(process, out var creation, out _, out _, out _) ? creation : 0;
             var buffer = new StringBuilder(1024);
             var size = (uint)buffer.Capacity;
-            return (started, QueryFullProcessImageName(process, 0, buffer, ref size) ? buffer.ToString() : null);
+            var path = QueryFullProcessImageName(process, 0, buffer, ref size) ? buffer.ToString() : null;
+            var started = GetProcessTimes(process, out var creation, out _, out _, out _) ? creation : 0;
+            return (path, started);
         }
         finally
         {

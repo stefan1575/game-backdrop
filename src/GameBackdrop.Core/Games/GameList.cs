@@ -13,10 +13,6 @@ public sealed class GameList(IEnumerable<GameEntry> games)
     /// <summary>The enabled game whose exe is <paramref name="exePath"/>, or null.</summary>
     public GameEntry? FindEnabled(string? exePath)
     {
-        if (string.IsNullOrEmpty(exePath)) return null;
-        var path = Normalise(exePath);
-        return _games.FirstOrDefault(g => g.Enabled && string.Equals(Normalise(g.ExePath), path, StringComparison.OrdinalIgnoreCase));
+        return _games.FirstOrDefault(g => g.Enabled && g.IsFor(exePath));
     }
-
-    private static string Normalise(string path) => path.Trim().Replace('/', '\\');
 }

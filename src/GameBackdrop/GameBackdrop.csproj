@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- The WinForms tray app. -->
+  <!-- The WinForms tray app. `dotnet publish -c Release` makes one self-contained .exe for
+       win-x64: it carries its own .NET runtime, so nothing needs installing first. -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
@@ -9,6 +10,8 @@
     <SelfContained>true</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <!-- Roughly halves the exe for a small cost at start. -->
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\GameBackdrop.Core\GameBackdrop.Core.csproj" />

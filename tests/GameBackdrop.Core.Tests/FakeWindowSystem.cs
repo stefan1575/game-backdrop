@@ -8,7 +8,7 @@ namespace GameBackdrop.Core.Tests;
 /// <see cref="FakeWindowSystem.ThrowOnNext"/>) first, then the rest, which the fake also numbers
 /// (<see cref="FakeWindowSystem.AfterCall"/>).
 /// </summary>
-public enum PortCall { SetFrame, CreateBackdrop, ShowBackdrop, MarkFullscreen, TopLevelWindows, Describe, OuterSizeFor, HideBackdrop, DestroyBackdrop, Activate }
+public enum PortCall { SetFrame, CreateBackdrop, ShowBackdrop, MarkFullscreen, TopLevelWindows, Describe, OuterSizeFor, HideBackdrop, DestroyBackdrop, Activate, ForegroundWindow, ClipCursor, ReleaseCursor }
 
 /// <summary>
 /// A scripted desktop: monitors, windows with styles and rects, one Z order (windows and
@@ -58,7 +58,9 @@ public sealed class FakeWindowSystem : IWindowSystem
     private readonly List<object> _zOrder = [];
 
     // Events the port's own calls caused, delivered after the current event or click returns.
-    private readonly Queue<(WindowEventKind Kind, FakeWindow Window)> _posted = new();
+    // A game's answer runs just before the event it goes with is delivered, as a game handling
+    // the change on its own thread later would.
+    private readonly Queue<(WindowEventKind Kind, FakeWindow Window, Action? Answer)> _posted = new();
     private bool _delivering;
 
     private nint _nextBackdrop = 0xB000;
@@ -67,12 +69,12 @@ public sealed class FakeWindowSystem : IWindowSystem
     public List<(WindowHandle Window, WindowFrame Frame)> FrameChanges { get; } = [];
 
     /// <summary>
-    /// Start a process: windows opened with it share its id, start time and exe path. Pass
-    /// <paramref name="reusingIdOf"/> for a process that gets the id of one that has exited, as
-    /// Windows recycles process ids; its start time still differs.
+    /// Start a process: windows opened with it share its id, exe path and start time. With
+    /// <paramref name="reusingIdOf"/> (a process that has exited) it gets that process's id, as
+    /// Windows reuses process ids, but a later start time.
     /// </summary>
     public FakeProcess StartProcess(string exePath, bool elevated = false, FakeProcess? reusingIdOf = null) =>
-        new(this, reusingIdOf?.Id ?? _nextProcessId++, _nextProcessStart++, exePath, elevated);
+        new(this, reusingIdOf?.Id ?? _nextProcessId++, exePath, elevated, _nextProcessStart++);
 
     /// <summary>Open a captioned window whose client area is <paramref name="clientSize"/>, at <paramref name="left"/>,<paramref name="top"/>.</summary>
     public FakeWindow OpenWindowed(FakeProcess process, Size clientSize, int left = 100, int top = 100, bool show = true) =>
@@ -98,6 +100,17 @@ public sealed class FakeWindowSystem : IWindowSystem
         Foreground = window;
         Raise(WindowEventKind.Shown, window);
         Raise(WindowEventKind.Foreground, window);
+    }
+
+    /// <summary>
+    /// The window is shown without activation (SW_SHOWNA): it comes to the front but the
+    /// foreground stays where it is, so only Shown is raised.
+    /// </summary>
+    public void ShowWithoutActivating(FakeWindow window)
+    {
+        window.IsVisible = true;
+        ToFront(window);
+        Raise(WindowEventKind.Shown, window);
     }
 
     /// <summary>
@@ -166,6 +179,27 @@ public sealed class FakeWindowSystem : IWindowSystem
         Raise(WindowEventKind.LocationChanged, window);
     }
 
+    /// <summary>
+    /// The game changes its own window: its styles and outer rect (a switch to or from
+    /// fullscreen, a resolution change), then LocationChanged.
+    /// </summary>
+    public void SetOwnFrame(FakeWindow window, WindowStyle style, Rect outer)
+    {
+        window.Style = style;
+        window.Outer = outer;
+        Raise(WindowEventKind.LocationChanged, window);
+    }
+
+    /// <summary>
+    /// The game resizes its client area to <paramref name="clientSize"/>, keeping its styles and
+    /// its top-left (a resolution change), then LocationChanged.
+    /// </summary>
+    public void ResizeClient(FakeWindow window, Size clientSize)
+    {
+        var (left, top, right, bottom) = FakeWindow.Insets(window.Style, window.HasMenu ? window.MenuRows : 0);
+        Move(window, Rect.FromPosition(window.Outer.Left, window.Outer.Top, new Size(clientSize.Width + left + right, clientSize.Height + top + bottom)));
+    }
+
     /// <summary>The window closes (or its process exits).</summary>
     public void Close(FakeWindow window)
     {
@@ -217,6 +251,7 @@ public sealed class FakeWindowSystem : IWindowSystem
         if (!_posted.TryDequeue(out var next)) return;
         // A controller that answers its own events with more calls would never settle.
         if (++_chain > 100) throw new InvalidOperationException("The port's own calls keep causing events: the controller never settles.");
+        next.Answer?.Invoke();
         try { Raise(next.Kind, next.Window); }
         finally { _chain--; }
     }
@@ -268,6 +303,38 @@ public sealed class FakeWindowSystem : IWindowSystem
         return handles;
     }
 
+    public WindowHandle? ForegroundWindow()
+    {
+        Begin(PortCall.ForegroundWindow);
+        var handle = Foreground?.Handle;
+        End(PortCall.ForegroundWindow);
+        return handle;
+    }
+
+    /// <summary>Where the cursor is kept, or null when it is free to go anywhere.</summary>
+    public Rect? CursorClip { get; private set; }
+
+    // The clip this port last set, so a release leaves another program's clip alone.
+    private Rect? _clipSet;
+
+    public void ClipCursor(Rect area)
+    {
+        Begin(PortCall.ClipCursor);
+        CursorClip = _clipSet = area;
+        End(PortCall.ClipCursor);
+    }
+
+    public void ReleaseCursor()
+    {
+        Begin(PortCall.ReleaseCursor);
+        if (CursorClip is not null && CursorClip == _clipSet) CursorClip = null;
+        _clipSet = null;
+        End(PortCall.ReleaseCursor);
+    }
+
+    /// <summary>Another program (a game that clips the cursor itself) keeps the cursor in <paramref name="area"/>.</summary>
+    public void SomeoneElseClipsCursor(Rect area) => CursorClip = area;
+
     public WindowInfo? Describe(WindowHandle handle)
     {
         Begin(PortCall.Describe, handle);
@@ -282,7 +349,7 @@ public sealed class FakeWindowSystem : IWindowSystem
         var w = Find(handle);
         if (w is null) return null;
         if (!_lifetimes.TryGetValue(handle, out var lifetime)) _lifetimes[handle] = lifetime = w.Lifetime;
-        return new WindowInfo(w.Handle, lifetime, w.Process.Id, w.Process.Started, w.Process.ExePath, w.Outer, w.Client, w.Style,
+        return new WindowInfo(w.Handle, lifetime, w.Process.Id, w.Process.ExePath, w.Process.Started, w.Outer, w.Client, w.Style,
             w.IsVisible, w.IsMinimized, w.Owner is not null, MonitorOf(w.Outer));
     }
 
@@ -319,7 +386,7 @@ public sealed class FakeWindowSystem : IWindowSystem
         }
         w.Style = frame.Style;
         w.Outer = frame.Outer;
-        _posted.Enqueue((WindowEventKind.LocationChanged, w));
+        _posted.Enqueue((WindowEventKind.LocationChanged, w, w.AnswersFrameChange is { } answer ? () => answer(w) : null));
         return ChangeResult.Ok;
     }
 
@@ -411,7 +478,7 @@ public sealed class FakeWindowSystem : IWindowSystem
         w.PortChanges.Add(PortCall.Activate);
         ToFront(w);
         Foreground = w;
-        _posted.Enqueue((WindowEventKind.Foreground, w));
+        _posted.Enqueue((WindowEventKind.Foreground, w, null));
         return ChangeResult.Ok;
     }
 
@@ -560,7 +627,7 @@ public sealed class FakeBackdrop(BackdropHandle handle)
     public bool IsDestroyed { get; set; }
 }
 
-public sealed record FakeProcess(FakeWindowSystem System, int Id, long Started, string ExePath, bool Elevated);
+public sealed record FakeProcess(FakeWindowSystem System, int Id, string ExePath, bool Elevated, long Started);
 
 public sealed class FakeWindow(WindowHandle handle, FakeProcess process, WindowStyle style, Rect outer, long lifetime)
 {
@@ -595,6 +662,12 @@ public sealed class FakeWindow(WindowHandle handle, FakeProcess process, WindowS
     public int FailedMarks { get; set; }
     public WindowHandle? Owner { get; init; }
     public Queue<ChangeResult> ScriptedResults { get; } = new();
+
+    /// <summary>
+    /// What the game does each time the port sets its frame: it changes its window again, after
+    /// the port call returns and before the LocationChanged event about the port's change.
+    /// </summary>
+    public Action<FakeWindow>? AnswersFrameChange { get; set; }
 
     public bool HasBorder => (Style.Style & (WindowStyle.WS_CAPTION | WindowStyle.WS_THICKFRAME)) != 0;
 

@@ -217,4 +217,24 @@ public sealed class HandOverTests
 
         Assert.Equal(1, notices);
     }
+
+    // A hotkey toggle-off that put the frame back but couldn't unmark leaves a restyled record
+    // without a backdrop too, before any Stop. The user turned that game off: a failed hand-over
+    // must not change it again, as it does a game the hand-over's own Stop left part-way.
+    [Fact]
+    public void A_game_toggled_off_before_a_failed_hand_over_stays_off()
+    {
+        var controller = StartController();
+        var dota = _desktop.OpenWindowed(_desktop.StartProcess(Dota), new Size(800, 600), left: 50, top: 60);
+        // The toggle's unmark, then the hand-over's Stop and its three retries.
+        _desktop.FailNextMarks(dota, 5);
+        controller.ToggleBackdrop();
+
+        var result = controller.HandOver(() => true, retries: 3);
+        _desktop.Raise(WindowEventKind.Foreground, dota);
+
+        Assert.False(result.HandedOver);
+        AssertUntouched(dota, DotaOriginal);
+        Assert.Empty(_desktop.VisibleBackdropsOn(FakeWindowSystem.Primary));
+    }
 }

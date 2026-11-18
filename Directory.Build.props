@@ -7,5 +7,8 @@
     <!-- Target .NET 10 (LTS). Roll forward so the build also runs where only a newer runtime
          is installed (the local SDK is 11); the published exe is self-contained either way. -->
     <RollForward>Major</RollForward>
+    <!-- Symbols inside each assembly, so the published app is one .exe and its crash dialog
+         still has line numbers. -->
+    <DebugType>embedded</DebugType>
   </PropertyGroup>
 </Project>
