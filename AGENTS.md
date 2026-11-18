@@ -9,7 +9,8 @@ Windows only (Stefan, 2026-11-15): Linux was considered and dropped, because Way
 an outside app move another app's window, so a shared backend wouldn't come for free.
 
 **On GitHub as the private `stefan1575/game-backdrop`.** Commit after every completed step, with
-a message that says what changed and why. Every PR is reviewed by Sol (`~/.claude/docs/pr-review.md`).
+a message that says what changed and why. The queue runner on Stefan's PC reviews every PR
+(`~/Code/Personal/queue-runner/docs/reviews.md`), and Stefan merges.
 
 ## Build and test
 
@@ -31,6 +32,12 @@ app at Low integrity (`icacls <copy>\GameBackdrop.exe /setintegritylevel low`, t
 beside a normal TestWindow. Windows refuses its restyle with the same access denied an elevated
 game gives a normal app, though a Low app's tray notice may not show. Start it detached
 (`cmd /c start`): a shell call that starts it directly can hang.
+
+Screenshots (a visible change needs a before and after): use the evidence harness on the
+`evidence` branch (`harness/README.md`). Add a scenario for the PR, run it on `main` for `before-`
+and on the PR for `after-`, and publish with the queue runner's `evidence.py publish --into
+pr-<n>`. Never `evidence.py screen`: it captures Stefan's whole desktop, other programs included.
+A state only Stefan can reach (a UAC prompt) is `Screenshot owed: <why>`.
 
 Layout: `src/GameBackdrop.Core` (no Win32: settings, game list, classifier, placement, and the
 `BackdropController` over the `IWindowSystem` port), `src/GameBackdrop.Windows` (the Win32
