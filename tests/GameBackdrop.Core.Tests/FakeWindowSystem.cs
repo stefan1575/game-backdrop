@@ -58,7 +58,9 @@ public sealed class FakeWindowSystem : IWindowSystem
     private readonly List<object> _zOrder = [];
 
     // Events the port's own calls caused, delivered after the current event or click returns.
-    private readonly Queue<(WindowEventKind Kind, FakeWindow Window)> _posted = new();
+    // A game's answer runs just before the event it goes with is delivered, as a game handling
+    // the change on its own thread later would.
+    private readonly Queue<(WindowEventKind Kind, FakeWindow Window, Action? Answer)> _posted = new();
     private bool _delivering;
 
     private nint _nextBackdrop = 0xB000;
@@ -177,6 +179,27 @@ public sealed class FakeWindowSystem : IWindowSystem
         Raise(WindowEventKind.LocationChanged, window);
     }
 
+    /// <summary>
+    /// The game changes its own window: its styles and outer rect (a switch to or from
+    /// fullscreen, a resolution change), then LocationChanged.
+    /// </summary>
+    public void SetOwnFrame(FakeWindow window, WindowStyle style, Rect outer)
+    {
+        window.Style = style;
+        window.Outer = outer;
+        Raise(WindowEventKind.LocationChanged, window);
+    }
+
+    /// <summary>
+    /// The game resizes its client area to <paramref name="clientSize"/>, keeping its styles and
+    /// its top-left (a resolution change), then LocationChanged.
+    /// </summary>
+    public void ResizeClient(FakeWindow window, Size clientSize)
+    {
+        var (left, top, right, bottom) = FakeWindow.Insets(window.Style, window.HasMenu ? window.MenuRows : 0);
+        Move(window, Rect.FromPosition(window.Outer.Left, window.Outer.Top, new Size(clientSize.Width + left + right, clientSize.Height + top + bottom)));
+    }
+
     /// <summary>The window closes (or its process exits).</summary>
     public void Close(FakeWindow window)
     {
@@ -228,6 +251,7 @@ public sealed class FakeWindowSystem : IWindowSystem
         if (!_posted.TryDequeue(out var next)) return;
         // A controller that answers its own events with more calls would never settle.
         if (++_chain > 100) throw new InvalidOperationException("The port's own calls keep causing events: the controller never settles.");
+        next.Answer?.Invoke();
         try { Raise(next.Kind, next.Window); }
         finally { _chain--; }
     }
@@ -338,7 +362,7 @@ public sealed class FakeWindowSystem : IWindowSystem
         }
         w.Style = frame.Style;
         w.Outer = frame.Outer;
-        _posted.Enqueue((WindowEventKind.LocationChanged, w));
+        _posted.Enqueue((WindowEventKind.LocationChanged, w, w.AnswersFrameChange is { } answer ? () => answer(w) : null));
         return ChangeResult.Ok;
     }
 
@@ -430,7 +454,7 @@ public sealed class FakeWindowSystem : IWindowSystem
         w.PortChanges.Add(PortCall.Activate);
         ToFront(w);
         Foreground = w;
-        _posted.Enqueue((WindowEventKind.Foreground, w));
+        _posted.Enqueue((WindowEventKind.Foreground, w, null));
         return ChangeResult.Ok;
     }
 
@@ -614,6 +638,12 @@ public sealed class FakeWindow(WindowHandle handle, FakeProcess process, WindowS
     public int FailedMarks { get; set; }
     public WindowHandle? Owner { get; init; }
     public Queue<ChangeResult> ScriptedResults { get; } = new();
+
+    /// <summary>
+    /// What the game does each time the port sets its frame: it changes its window again, after
+    /// the port call returns and before the LocationChanged event about the port's change.
+    /// </summary>
+    public Action<FakeWindow>? AnswersFrameChange { get; set; }
 
     public bool HasBorder => (Style.Style & (WindowStyle.WS_CAPTION | WindowStyle.WS_THICKFRAME)) != 0;
 
