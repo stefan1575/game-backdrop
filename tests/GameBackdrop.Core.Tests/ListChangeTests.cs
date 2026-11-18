@@ -66,6 +66,32 @@ public sealed class ListChangeTests
     }
 
     [Fact]
+    public void Keep_mouse_inside_switched_off_frees_the_mouse_at_once_and_switched_on_keeps_it_inside_again()
+    {
+        StartController(Entry(Dota, "Dota 2"));
+        var game = OpenDota();
+        Assert.Equal(game.Client, _desktop.CursorClip);
+
+        ListChangesTo(new GameEntry { ExePath = Dota, DisplayName = "Dota 2", KeepMouseInside = false });
+        Assert.Null(_desktop.CursorClip);
+        Assert.False(game.HasBorder);
+
+        ListChangesTo(Entry(Dota, "Dota 2"));
+        Assert.Equal(game.Client, _desktop.CursorClip);
+    }
+
+    [Fact]
+    public void Switching_off_a_game_in_front_frees_the_mouse()
+    {
+        StartController(Entry(Dota, "Dota 2"));
+        OpenDota();
+
+        ListChangesTo(Entry(Dota, "Dota 2", enabled: false));
+
+        Assert.Null(_desktop.CursorClip);
+    }
+
+    [Fact]
     public void Switching_off_one_game_leaves_another_game_s_backdrop_alone()
     {
         StartController(Entry(Dota, "Dota 2"), Entry(Novel, "Novel"));

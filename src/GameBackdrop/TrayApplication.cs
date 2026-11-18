@@ -7,7 +7,8 @@ namespace GameBackdrop;
 
 /// <summary>
 /// The tray icon and its menu, and the wiring: settings → game list → controller over the Win32
-/// window system. Every changed game window is put back when the app quits, however it quits.
+/// window system, and the hotkey that toggles the backdrop for the game in front. Every changed
+/// game window is put back when the app quits, however it quits.
 /// </summary>
 internal sealed class TrayApplication : ApplicationContext
 {
@@ -16,6 +17,7 @@ internal sealed class TrayApplication : ApplicationContext
     private readonly BackdropController _controller;
     private readonly GameListModel _games;
     private GameListForm? _list;
+    private readonly GlobalHotkey? _hotkey;
     private bool _failureReported;
     private bool _crashing;
 
@@ -54,15 +56,25 @@ internal sealed class TrayApplication : ApplicationContext
         AppDomain.CurrentDomain.UnhandledException += (_, e) => Crash(e.ExceptionObject as Exception);
         Application.ApplicationExit += (_, _) => StopController();
 
+        // One balloon at a time shows, so every startup notice goes in the same one (Windows cuts
+        // its text at 255 characters; both together only come with a corrupt file).
+        var notices = new List<string>();
         if (_games.LoadStatus == SettingsLoadStatus.Corrupt)
-        {
-            _icon.ShowBalloonTip(5000, "Game Backdrop",
-                $"The settings file couldn't be read, so no games are listed. It is left as it is until the list " +
-                $"is changed, and then kept beside it as a .corrupt copy: {settings.FilePath}",
-                ToolTipIcon.Warning);
-        }
+            notices.Add($"The settings file couldn't be read, so no games are listed. It is left as it is until the list " +
+                $"is changed, and then kept beside it as a .corrupt copy: {settings.FilePath}");
 
         _controller.Start();
+
+        var hotkey = Hotkey.FromSettings(_games.Hotkey, out var understood);
+        if (!understood)
+            notices.Add($"The hotkey \"{_games.Hotkey}\" in the settings isn't one the app can read, so {hotkey} is used.");
+        // Another app holding the keys means no toggle, and a notice: never a crash.
+        _hotkey = GlobalHotkey.TryRegister(hotkey, _controller.ToggleBackdrop);
+        if (_hotkey is null)
+            notices.Add($"{hotkey} is taken by another app, so it won't toggle the backdrop. Set another \"hotkey\" in the settings file.");
+
+        if (notices.Count > 0)
+            _icon.ShowBalloonTip(5000, "Game Backdrop", string.Join("\n\n", notices), ToolTipIcon.Warning);
     }
 
     /// <summary>Open the game list window, or bring it to the front if it's open.</summary>
@@ -80,6 +92,7 @@ internal sealed class TrayApplication : ApplicationContext
 
     protected override void ExitThreadCore()
     {
+        _hotkey?.Dispose();
         StopController();
         _icon.Visible = false;
         base.ExitThreadCore();
@@ -90,6 +103,7 @@ internal sealed class TrayApplication : ApplicationContext
         if (disposing)
         {
             _list?.Dispose();
+            _hotkey?.Dispose();
             StopController();
             _icon.Dispose();
             _windows.Dispose();
@@ -99,7 +113,7 @@ internal sealed class TrayApplication : ApplicationContext
 
     /// <summary>
     /// Stop the controller and put every game back. A restore that fails is retried a few times;
-    /// any game still not put back is named to Stefan once, rather than forgotten silently. The
+    /// any game still not put back is named to the user once, rather than forgotten silently. The
     /// controller is stopped (no longer handling window events) before any dialog opens, so the
     /// dialog's message loop can't restyle a game again.
     /// </summary>

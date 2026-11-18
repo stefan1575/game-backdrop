@@ -40,7 +40,7 @@ public static class OpenWindows
 
         var title = Title(hwnd);
         if (string.IsNullOrWhiteSpace(title)) return null;
-        var exe = Win32WindowSystem.ProcessPath(processId);
+        var exe = Win32WindowSystem.ProcessDetails(processId).Path;
         return exe is null ? null : new OpenWindow(new WindowHandle(hwnd), title, exe);
     }
 

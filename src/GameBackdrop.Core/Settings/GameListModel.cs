@@ -60,6 +60,9 @@ public sealed class GameListModel
 
     public IReadOnlyList<GameEntry> Games => _settings.Games;
 
+    /// <summary>The hotkey as written in the settings (null: the default); a change to the list saves it as it is.</summary>
+    public string? Hotkey => _settings.Hotkey;
+
     /// <summary>The list as the controller matches it.</summary>
     public GameList ToGameList() => new(_settings.Games);
 
@@ -125,7 +128,7 @@ public sealed class GameListModel
     /// <summary>Save the settings with this game list, then make it the current one and announce it.</summary>
     private void Commit(List<GameEntry> games)
     {
-        var next = new AppSettings { Games = games, UnknownFields = _settings.UnknownFields };
+        var next = new AppSettings { Hotkey = _settings.Hotkey, Games = games, UnknownFields = _settings.UnknownFields };
         try
         {
             if (_corruptFileToKeep) KeepCorruptFile();

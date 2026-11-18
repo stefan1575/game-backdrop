@@ -15,6 +15,7 @@ namespace GameBackdrop.Windows.Tests;
 /// A test that can't set up what it checks here (the foreground, a shell taskbar) passes without
 /// checking and says so in its output (<c>dotnet test --logger "console;verbosity=detailed"</c>).
 /// </summary>
+[Collection(DesktopCollection.Name)]
 public sealed class Win32WindowSystemTests : IDisposable
 {
     private readonly ITestOutputHelper _output;
@@ -86,6 +87,28 @@ public sealed class Win32WindowSystemTests : IDisposable
             DestroyWindow(ownWindow);
             second.Kill();
         }
+    }
+
+    [Fact]
+    public void The_foreground_window_is_the_one_the_user_is_in()
+    {
+        if (!TryMakeForeground(_hwnd))
+        {
+            _output.WriteLine("Not checked: Windows wouldn't give the test window the foreground.");
+            return;
+        }
+
+        Assert.Equal(new WindowHandle(_hwnd), _windows.ForegroundWindow());
+    }
+
+    [Fact]
+    public void A_window_is_described_with_its_process_s_id_path_and_start_time()
+    {
+        var info = _windows.Describe(new WindowHandle(_hwnd))!;
+
+        Assert.Equal(_testWindow.Id, info.ProcessId);
+        Assert.Equal(_testWindow.MainModule!.FileName, info.ProcessPath, ignoreCase: true);
+        Assert.Equal(_testWindow.StartTime.ToFileTimeUtc(), info.ProcessStarted);
     }
 
     [Fact]
@@ -422,6 +445,68 @@ public sealed class Win32WindowSystemTests : IDisposable
         Assert.Equal(ChangeResult.WindowGone, _windows.Activate(handle));
     }
 
+    [Fact]
+    public void Clipping_keeps_the_cursor_inside_the_game_s_client_area_and_releasing_frees_it()
+    {
+        var area = _windows.Describe(new WindowHandle(_hwnd))!.Client;
+        if (!CursorCanBeClipped(out var free)) return;
+        try
+        {
+            _windows.ClipCursor(area);
+
+            Assert.Equal(area, CurrentClip());
+
+            _windows.ReleaseCursor();
+
+            Assert.Equal(free, CurrentClip());
+        }
+        finally
+        {
+            ClipCursor(0);
+        }
+    }
+
+    [Fact]
+    public void Releasing_leaves_a_clip_another_program_set_since_alone()
+    {
+        var area = _windows.Describe(new WindowHandle(_hwnd))!.Client;
+        if (!CursorCanBeClipped(out _)) return;
+        var theirs = new RECT { Left = area.Left + 10, Top = area.Top + 10, Right = area.Right - 10, Bottom = area.Bottom - 10 };
+        try
+        {
+            _windows.ClipCursor(area);
+            ClipCursor(ref theirs);
+
+            _windows.ReleaseCursor();
+
+            Assert.Equal(new Rect(theirs.Left, theirs.Top, theirs.Right, theirs.Bottom), CurrentClip());
+        }
+        finally
+        {
+            ClipCursor(0);
+        }
+    }
+
+    /// <summary>
+    /// Whether this desktop lets the cursor be clipped (a test runner's may not), tried by hand and
+    /// freed again; <paramref name="free"/> is the clip of a free cursor (the whole virtual screen).
+    /// </summary>
+    private bool CursorCanBeClipped(out Rect free)
+    {
+        free = CurrentClip();
+        var probe = new RECT { Left = free.Left, Top = free.Top, Right = free.Left + 100, Bottom = free.Top + 100 };
+        var clipped = ClipCursor(ref probe) && CurrentClip() == new Rect(probe.Left, probe.Top, probe.Right, probe.Bottom);
+        ClipCursor(0);
+        if (!clipped) NotChecked("this desktop doesn't let the cursor be clipped");
+        return clipped;
+    }
+
+    private static Rect CurrentClip()
+    {
+        Assert.True(GetClipCursor(out var r));
+        return new Rect(r.Left, r.Top, r.Right, r.Bottom);
+    }
+
     /// <summary>The test passes without checking: say why, so a run shows which tests checked nothing.</summary>
     private void NotChecked(string why) => _output.WriteLine($"NOT CHECKED: {why}.");
 
@@ -506,6 +591,9 @@ public sealed class Win32WindowSystemTests : IDisposable
     [StructLayout(LayoutKind.Sequential)]
     private struct RECT { public int Left, Top, Right, Bottom; }
     [DllImport("user32.dll")] private static extern bool GetWindowRect(nint hwnd, out RECT rect);
+    [DllImport("user32.dll")] private static extern bool ClipCursor(ref RECT rect);
+    [DllImport("user32.dll")] private static extern bool ClipCursor(nint none);
+    [DllImport("user32.dll")] private static extern bool GetClipCursor(out RECT rect);
     [DllImport("user32.dll")] private static extern nint GetWindow(nint hwnd, uint command);
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern nint GetWindowLongPtr(nint hwnd, int index);
     [DllImport("user32.dll")] private static extern nint GetForegroundWindow();

@@ -67,6 +67,18 @@ public sealed class GameListModelTests : IDisposable
     }
 
     [Fact]
+    public void A_change_to_the_list_keeps_the_hotkey_as_written()
+    {
+        new SettingsStore(FilePath).Save(new AppSettings { Hotkey = "ctrl+shift+F9" });
+        var model = Open();
+
+        model.Add(Dota, "Dota 2");
+
+        Assert.Equal("ctrl+shift+F9", model.Hotkey);
+        Assert.Equal("ctrl+shift+F9", new SettingsStore(FilePath).Load().Settings.Hotkey);
+    }
+
+    [Fact]
     public void A_renamed_game_is_saved_under_its_new_name()
     {
         var model = Open();

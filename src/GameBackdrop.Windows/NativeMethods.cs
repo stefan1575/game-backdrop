@@ -6,7 +6,8 @@ namespace GameBackdrop.Windows;
 /// <summary>
 /// The Win32 functions the window system uses. Every call acts on a window handle, except
 /// reading a process's exe path, which opens it with PROCESS_QUERY_LIMITED_INFORMATION only
-/// (no memory access), and the backdrop's window class and windows, which are this process's own.
+/// (no memory access), and the backdrop's and hotkey's window classes and windows, which are this
+/// process's own.
 /// </summary>
 internal static class NativeMethods
 {
@@ -16,6 +17,7 @@ internal static class NativeMethods
     public const nint HWND_TOP = 0;
     public const nint HWND_BOTTOM = 1;
     public const nint HWND_NOTOPMOST = -2;
+    public const nint HWND_MESSAGE = -3;
 
     public const uint SWP_NOSIZE = 0x0001;
     public const uint SWP_NOMOVE = 0x0002;
@@ -37,6 +39,8 @@ internal static class NativeMethods
     public const uint WS_POPUP = 0x80000000;
 
     public const uint WM_MOUSEACTIVATE = 0x0021;
+    public const uint WM_HOTKEY = 0x0312;
+    public const uint MOD_NOREPEAT = 0x4000;
     public const uint WM_LBUTTONDOWN = 0x0201;
     public const uint WM_RBUTTONDOWN = 0x0204;
     public const uint WM_MBUTTONDOWN = 0x0207;
@@ -240,6 +244,27 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     public static extern nint GetForegroundWindow();
 
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool RegisterHotKey(nint hWnd, int id, uint fsModifiers, uint vk);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool UnregisterHotKey(nint hWnd, int id);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool ClipCursor(ref RECT lpRect);
+
+    /// <summary>ClipCursor(NULL): the cursor is free to go anywhere on the screen.</summary>
+    [DllImport("user32.dll", SetLastError = true, EntryPoint = "ClipCursor")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool FreeCursor(nint none);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool GetClipCursor(out RECT lpRect);
+
     [DllImport("user32.dll", EntryPoint = "LoadCursorW")]
     public static extern nint LoadCursor(nint hInstance, nint lpCursorName);
 
@@ -255,6 +280,11 @@ internal static class NativeMethods
     [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode, EntryPoint = "QueryFullProcessImageNameW")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool QueryFullProcessImageName(nint hProcess, uint dwFlags, StringBuilder lpExeName, ref uint lpdwSize);
+
+    /// <summary>The process's times, as FILETIMEs; needs only PROCESS_QUERY_LIMITED_INFORMATION.</summary>
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool GetProcessTimes(nint hProcess, out long lpCreationTime, out long lpExitTime, out long lpKernelTime, out long lpUserTime);
 
     [DllImport("kernel32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
