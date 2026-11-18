@@ -28,6 +28,12 @@ in a settings file and start the app with `--settings <path>` to leave the real
 `%APPDATA%\GameBackdrop\settings.json` alone; such a run also keeps its Start at logon shortcut in
 a `Startup` folder beside that settings file, never in the real Startup folder.
 
+A game running as administrator can be stood in for without a UAC prompt: run a copy of the
+app at Low integrity (`icacls <copy>\GameBackdrop.exe /setintegritylevel low`, then start it)
+beside a normal TestWindow. Windows refuses its restyle with the same access denied an elevated
+game gives a normal app, though a Low app's tray notice may not show. Start it detached
+(`cmd /c start`): a shell call that starts it directly can hang.
+
 Screenshots (a visible change needs a before and after): use the evidence harness on the
 `evidence` branch (`harness/README.md`). Add a scenario for the PR, run it on `main` for `before-`
 and on the PR for `after-`. Never capture the whole desktop: it shows other programs.

@@ -82,6 +82,10 @@ public readonly record struct GameRun(int ProcessId, long Started)
 /// <paramref name="KnownStyle"/>) is the game's own, and clears them. The game's own view of its
 /// window is what it has now with these on it: whether it has a title bar, and what goes back on
 /// it when it goes fullscreen while it still has the controller's strip, or on quit after that.</param>
+/// <param name="LeftByStop">A restyled window, with its backdrop, that a <see cref="BackdropController.Stop"/>
+/// couldn't finish putting back (a failed hand-over). Once the controller starts again it is
+/// changed again from its first original (<c>Resume</c>), not followed as a restyled window: it
+/// has no backdrop, and a restore can have stopped part-way.</param>
 public sealed record TrackedWindow(
     WindowHandle Window,
     int ProcessId,
@@ -101,7 +105,8 @@ public sealed record TrackedWindow(
     bool EverRestyled = false,
     DateTimeOffset LastPlaced = default,
     int Fights = 0,
-    WindowStyle Owed = default)
+    WindowStyle Owed = default,
+    bool LeftByStop = false)
 {
     public GameRun Run => new(ProcessId, ProcessStarted);
 
@@ -112,6 +117,11 @@ public sealed record TrackedWindow(
     /// </summary>
     public bool IsRestyledNow => State == TrackedState.Restyled && !FrameRestored;
 }
+
+/// <summary>What <see cref="BackdropController.HandOver"/> did.</summary>
+/// <param name="HandedOver">Every game was put back and the replacement started: this copy is to quit now.</param>
+/// <param name="NotRestored">The windows that couldn't be put back, which stopped the hand-over.</param>
+public sealed record HandOverResult(bool HandedOver, IReadOnlyList<TrackedWindow> NotRestored);
 
 /// <summary>
 /// Turns window events into actions on the window system: a state machine per tracked game
@@ -160,10 +170,24 @@ public sealed class BackdropController(IWindowSystem windows, GameList games, Ti
     // The game runs the user toggled off: every window of theirs is left as it is. Kept by run,
     // past the window that was toggled, until toggled on or the process id turns up on another run.
     private readonly HashSet<GameRun> _toggledOff = [];
+    // The game runs the administrator notice has been raised for.
+    private readonly HashSet<GameRun> _noticed = [];
 
     public IReadOnlyCollection<TrackedWindow> TrackedWindows => _tracked.Values;
 
-    /// <summary>Start watching, and handle the listed games that are already running.</summary>
+    /// <summary>
+    /// A listed game's window refused to be restyled (access denied): the game runs as
+    /// administrator and the app doesn't. Raised once per run of the game (<see cref="GameRun"/>),
+    /// however many windows it opens, from inside the controller's own handling; the window is
+    /// left as it is and not tried again. A handler must not call back into the controller.
+    /// </summary>
+    public event Action<GameEntry>? GameRunsAsAdministrator;
+
+    /// <summary>
+    /// Start watching, and handle the listed games that are already running. After a
+    /// <see cref="Stop"/> that couldn't put a game back, starting again changes that game again,
+    /// keeping its first original (<see cref="TrackedWindow.LeftByStop"/>).
+    /// </summary>
     public void Start()
     {
         if (_running) return;
@@ -190,10 +214,40 @@ public sealed class BackdropController(IWindowSystem windows, GameList games, Ti
             windows.BackdropClicked -= OnBackdropClicked;
         }
         ReleaseCursor();
+        // A window restyled with its backdrop now is changed again if the controller starts
+        // again before it is put back (a toggle that put back its frame but not its unmark has
+        // no backdrop, and stays as the user left it).
+        var restyled = _tracked.Values.Where(t => t.State == TrackedState.Restyled && (t.Backdrop is not null || t.LeftByStop))
+            .Select(t => t.Window).ToHashSet();
         // Nothing moves a backdrop once events stop, so none stays, even behind a game that
         // couldn't be put back.
         foreach (var tracked in _tracked.Values.ToList()) DropBackdrop(tracked);
-        return RestoreAll();
+        var notRestored = RestoreAll();
+        foreach (var left in notRestored.Where(t => t.State == TrackedState.Restyled && restyled.Contains(t.Window)))
+            Save(left with { LeftByStop = true });
+        return notRestored.Select(t => _tracked[t.Window]).ToList();
+    }
+
+    /// <summary>
+    /// Hand the games over to a copy that takes over from this one (the restart as
+    /// administrator): stop and put every game back, retrying a failed restore up to
+    /// <paramref name="retries"/> times, and only then start the replacement. The replacement
+    /// saves each window as it finds it as the original, so a game still changed when it starts
+    /// would never be put back. If a game can't be put back, or the replacement doesn't start
+    /// (<paramref name="startReplacement"/> returns false), nothing is handed over: this
+    /// controller starts again, changing the games again, and the caller keeps running.
+    /// </summary>
+    public HandOverResult HandOver(Func<bool> startReplacement, int retries = 0, Action? beforeRetry = null)
+    {
+        var notRestored = Stop();
+        for (var attempt = 0; attempt < retries && notRestored.Count > 0; attempt++)
+        {
+            beforeRetry?.Invoke();
+            notRestored = Stop();
+        }
+        if (notRestored.Count == 0 && startReplacement()) return new HandOverResult(true, []);
+        Start();
+        return new HandOverResult(false, notRestored);
     }
 
     /// <summary>
@@ -276,6 +330,7 @@ public sealed class BackdropController(IWindowSystem windows, GameList games, Ti
     private static TrackedWindow AsRestorePending(TrackedWindow left) => left with
     {
         State = TrackedState.RestorePending,
+        LeftByStop = false,
         FrameRestored = left.FrameRestored || left.State is not (TrackedState.Restyled or TrackedState.RestorePending),
     };
 
@@ -334,7 +389,7 @@ public sealed class BackdropController(IWindowSystem windows, GameList games, Ti
         }
         // Put back, or gone (StillLive forgets a gone window, its backdrop with it).
         if (StillLive(tracked) is null) return;
-        Save(DropBackdrop(tracked) with { State = TrackedState.ToggledOff, FrameRestored = false, MarkedFullscreen = false, Owed = default });
+        Save(DropBackdrop(tracked) with { State = TrackedState.ToggledOff, FrameRestored = false, MarkedFullscreen = false, Owed = default, LeftByStop = false });
         _toggledOff.Add(tracked.Run);
     }
 
@@ -365,6 +420,14 @@ public sealed class BackdropController(IWindowSystem windows, GameList games, Ti
         // An event about an earlier window behind this handle, posted before it was destroyed.
         if (e.Lifetime != 0 && e.Lifetime != tracked.Lifetime) return;
         if (e.Kind == WindowEventKind.Foreground) NoteInFront(tracked);
+        if (tracked.LeftByStop)
+        {
+            // Not changed again yet (it was minimised, or the change failed): coming back on
+            // screen is the next chance. Until then it isn't followed: it has no backdrop.
+            if (e.Kind is WindowEventKind.Foreground or WindowEventKind.MinimizeEnd && !Resume(tracked, info))
+                Consider(e.Window); // fully back and forgotten: decided on afresh
+            return;
+        }
         if (e.Kind == WindowEventKind.LocationChanged)
         {
             Reassess(tracked, info);
@@ -402,15 +465,24 @@ public sealed class BackdropController(IWindowSystem windows, GameList games, Ti
     {
         if (TryGetLive(handle, out var known, out var live))
         {
-            // The same window shown again: it keeps its backdrop, and its first original. A game
-            // that hides its window while it switches mode is shown in its new one, which its
-            // LocationChanged events, ignored while it was hidden, didn't get to follow.
-            Reassess(known, live);
-            // Reassess can have made port calls: the window is checked again before the next.
-            if (!_tracked.TryGetValue(handle, out known) || StillLive(known) is not { } now) return;
-            ShowBackdrop(known, now);
-            MarkAgain(known);
-            return;
+            if (known.LeftByStop)
+            {
+                if (Resume(known, live)) return;
+                // It was back as it was, and now its unmark is done too: unchanged and untracked,
+                // so it is decided on afresh below.
+            }
+            else
+            {
+                // The same window shown again: it keeps its backdrop, and its first original. A
+                // game that hides its window while it switches mode is shown in its new one, which
+                // its LocationChanged events, ignored while it was hidden, didn't get to follow.
+                Reassess(known, live);
+                // Reassess can have made port calls: the window is checked again before the next.
+                if (!_tracked.TryGetValue(handle, out known) || StillLive(known) is not { } now) return;
+                ShowBackdrop(known, now);
+                MarkAgain(known);
+                return;
+            }
         }
         // Not tracked, or the tracked window is gone (and forgotten): whatever has the handle now is new.
         var info = windows.Describe(handle);
@@ -446,6 +518,62 @@ public sealed class BackdropController(IWindowSystem windows, GameList games, Ti
         }
 
         Track(info, game);
+    }
+
+    /// <summary>
+    /// Carry on with a window a <see cref="Stop"/> left part-way back (<see cref="TrackedWindow.LeftByStop"/>).
+    /// The restore can have done anything from nothing to all but the unmark, and a half-done one
+    /// (<see cref="ChangeResult.PartlyChanged"/>) can leave the title bar back on the borderless
+    /// rectangle. So the window gets its whole changed frame again, worked out from its first
+    /// original and its client size, and its backdrop; it keeps that original, and any unmark
+    /// still owed. A window whose frame is back is unmarked again first: if that works nothing is
+    /// owed, and this returns false for the caller to decide on it afresh. A window that is off
+    /// screen, or now fills its screen of its own accord, or refuses the change, keeps its record
+    /// as it is: Stop still finishes putting it back, and its next Shown, Foreground or MinimizeEnd
+    /// tries again. Returns whether the window is still tracked by this record.
+    /// <paramref name="live"/> is a Describe of it with no port call since.
+    /// </summary>
+    private bool Resume(TrackedWindow tracked, WindowInfo live)
+    {
+        if (tracked.FrameRestored)
+        {
+            var left = TryRestore(tracked);
+            if (left is null)
+            {
+                Forget(tracked);
+                return false;
+            }
+            tracked = Save(left);
+            if (StillLive(tracked) is not { } now) return true;
+            live = now;
+            if (IsCandidate(live) && Classify(live) != WindowMode.Windowed) return true;
+        }
+        if (!IsCandidate(live)) return true;
+
+        // The original's frame, stripped, over the styles the window has now (as a restore puts
+        // it back): what the game set itself meanwhile stays.
+        var unstripped = live.Style.WithFrameOf(tracked.Original.Style);
+        var style = unstripped.Borderless();
+        var outerSize = windows.OuterSizeFor(tracked.Window, style, tracked.ClientSize);
+        if (StillLive(tracked) is not { } before) return true;
+        var result = windows.SetFrame(tracked.Window, new WindowFrame(style, Placement.Centre(outerSize, before.Monitor.Bounds)));
+        // Anything else changed nothing: the window stays as the restore left it.
+        if (result is not (ChangeResult.Ok or ChangeResult.PartlyChanged)) return true;
+        tracked = Save(tracked with
+        {
+            FrameRestored = false, LeftByStop = false, LastPlaced = _time.GetUtcNow(), Fights = 0,
+            Owed = tracked.Owed.With(unstripped.TakenOffByBorderless()),
+        });
+        if (StillLive(tracked) is not { } after) return true;
+        if (result == ChangeResult.Ok && after.Client.Size != tracked.ClientSize)
+        {
+            CorrectClientSize(tracked.Window, tracked.ClientSize, before.Monitor.Bounds, style, outerSize, after);
+            if (StillLive(tracked) is not { } corrected) return true;
+            after = corrected;
+        }
+        tracked = Save(Known(tracked, after));
+        GiveBackdrop(tracked);
+        return true;
     }
 
     /// <summary>
@@ -542,6 +670,7 @@ public sealed class BackdropController(IWindowSystem windows, GameList games, Ti
             case ChangeResult.AccessDenied:
                 // Not retried; quitting still puts back a style or a mark it owed from before.
                 Save(tracked with { State = TrackedState.AccessDenied });
+                if (_noticed.Add(tracked.Run)) GameRunsAsAdministrator?.Invoke(tracked.Game);
                 return;
             case ChangeResult.WindowGone:
             case ChangeResult.Failed:
@@ -860,12 +989,18 @@ public sealed class BackdropController(IWindowSystem windows, GameList games, Ti
     /// than the port predicts. Grow the window by what the client area lost, measured, and centre
     /// it again. If that fails the window stays restyled and is still put back on quit.
     /// </summary>
-    private void CorrectClientSize(WindowInfo before, WindowStyle style, Size outerSize, WindowInfo after)
+    private void CorrectClientSize(WindowInfo before, WindowStyle style, Size outerSize, WindowInfo after) =>
+        CorrectClientSize(before.Handle, before.Client.Size, before.Monitor.Bounds, style, outerSize, after);
+
+    /// <inheritdoc cref="CorrectClientSize(WindowInfo, WindowStyle, Size, WindowInfo)"/>
+    /// <param name="client">The client size the window is to keep.</param>
+    /// <param name="monitorBounds">The monitor it is centred on.</param>
+    private void CorrectClientSize(WindowHandle window, Size client, Rect monitorBounds, WindowStyle style, Size outerSize, WindowInfo after)
     {
         var corrected = new Size(
-            outerSize.Width + before.Client.Width - after.Client.Width,
-            outerSize.Height + before.Client.Height - after.Client.Height);
-        windows.SetFrame(before.Handle, new WindowFrame(style, Placement.Centre(corrected, before.Monitor.Bounds)));
+            outerSize.Width + client.Width - after.Client.Width,
+            outerSize.Height + client.Height - after.Client.Height);
+        windows.SetFrame(window, new WindowFrame(style, Placement.Centre(corrected, monitorBounds)));
     }
 
     /// <summary>
@@ -935,6 +1070,7 @@ public sealed class BackdropController(IWindowSystem windows, GameList games, Ti
     private void ForgetEndedRuns(GameRun run)
     {
         _toggledOff.RemoveWhere(r => r.ProcessId == run.ProcessId && r != run);
+        _noticed.RemoveWhere(r => r.ProcessId == run.ProcessId && r != run);
         _inFront.RemoveAll(r => r.ProcessId == run.ProcessId && r != run);
     }
 

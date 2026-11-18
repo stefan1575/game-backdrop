@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using GameBackdrop.Core.Controller;
 using GameBackdrop.Core.Games;
@@ -10,11 +12,19 @@ namespace GameBackdrop;
 /// <summary>
 /// The tray icon and its menu, and the wiring: settings → game list → controller over the Win32
 /// window system, and the hotkey that toggles the backdrop for the game in front. Every changed
-/// game window is put back when the app quits, however it quits.
+/// game window is put back when the app quits, however it quits. A game running as administrator
+/// gets a notice that offers to restart the app as administrator.
 /// </summary>
 internal sealed class TrayApplication : ApplicationContext
 {
+    private const int ErrorCancelled = 1223; // ShellExecute: the UAC prompt was declined
+    private const int RestoreRetries = 3;
+    private const int RestoreRetryDelay = 200; // ms
+
+    private static readonly bool Elevated = Environment.IsPrivilegedProcess;
+
     private readonly NotifyIcon _icon;
+    private readonly ToolStripMenuItem _restartItem;
     private readonly Win32WindowSystem _windows;
     private readonly BackdropController _controller;
     private readonly StartAtLogon _startAtLogon;
@@ -22,10 +32,16 @@ internal sealed class TrayApplication : ApplicationContext
     private GameListForm? _list;
     private readonly GlobalHotkey? _hotkey;
     private bool _failureReported;
+    private readonly string? _settingsArgument;
     private bool _crashing;
+    private bool _balloonOffersRestart;
+    private bool _restarting;
 
-    public TrayApplication(SettingsStore settings, StartAtLogon startAtLogon)
+    /// <param name="settingsArgument">The <c>--settings</c> path the app was started with, if
+    /// any, so a restart as administrator uses the same file.</param>
+    public TrayApplication(SettingsStore settings, StartAtLogon startAtLogon, string? settingsArgument)
     {
+        _settingsArgument = settingsArgument;
         // The window system posts its events here; Application.Run would install it too, but
         // the controller starts (and may get events) before that.
         SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
@@ -36,16 +52,20 @@ internal sealed class TrayApplication : ApplicationContext
         // Each saved change reaches the running controller at once: a game switched off or
         // removed is put back, one switched on or added is handled if it's running.
         _games.Changed += () => _controller.UpdateGames(_games.ToGameList());
+        _controller.GameRunsAsAdministrator += ShowAdministratorNotice;
 
         _startAtLogon = startAtLogon;
         var startAtLogonItem = new ToolStripMenuItem("Start at logon");
         startAtLogonItem.Click += (_, _) => ToggleStartAtLogon();
 
+        // Shown once a game running as administrator has been seen, for when its notice is gone.
+        _restartItem = new ToolStripMenuItem("Restart as administrator", null, (_, _) => RestartAsAdministrator()) { Visible = false };
         var menu = new ContextMenuStrip();
         var openList = new ToolStripMenuItem("Open list", null, (_, _) => ShowList());
         openList.Font = new Font(openList.Font, FontStyle.Bold);
         menu.Items.Add(openList);
         menu.Items.Add(startAtLogonItem);
+        menu.Items.Add(_restartItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Quit", null, (_, _) => ExitThread());
         // Read fresh each time: the shortcut or the settings file may have changed outside the app.
@@ -57,13 +77,17 @@ internal sealed class TrayApplication : ApplicationContext
         _icon = new NotifyIcon
         {
             Icon = SystemIcons.Application,
-            Text = "Game Backdrop",
+            Text = Elevated ? "Game Backdrop (administrator)" : "Game Backdrop",
             ContextMenuStrip = menu,
             Visible = true,
         };
         _icon.MouseDoubleClick += (_, e) =>
         {
             if (e.Button == MouseButtons.Left) ShowList();
+        };
+        _icon.BalloonTipClicked += (_, _) =>
+        {
+            if (_balloonOffersRestart) RestartAsAdministrator();
         };
 
         Application.ThreadException += (_, e) => Crash(e.Exception);
@@ -97,7 +121,7 @@ internal sealed class TrayApplication : ApplicationContext
             notices.Add($"{hotkey} is taken by another app, so it won't toggle the backdrop. Set another \"hotkey\" in the settings file.");
 
         if (notices.Count > 0)
-            _icon.ShowBalloonTip(5000, "Game Backdrop", string.Join("\n\n", notices), ToolTipIcon.Warning);
+            ShowBalloon(5000, "Game Backdrop", string.Join("\n\n", notices), ToolTipIcon.Warning);
     }
 
     /// <summary>Open the game list window, or bring it to the front if it's open.</summary>
@@ -121,9 +145,87 @@ internal sealed class TrayApplication : ApplicationContext
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or COMException or InvalidOperationException)
         {
-            _icon.ShowBalloonTip(5000, "Game Backdrop",
-                $"Couldn't change starting at logon: {e.Message}", ToolTipIcon.Warning);
+            ShowBalloon(5000, "Game Backdrop", $"Couldn't change starting at logon: {e.Message}", ToolTipIcon.Warning);
         }
+    }
+
+    /// <summary>
+    /// A listed game runs as administrator, so its window refused to change. Raised once per run
+    /// of the game. Unless the app already runs as administrator, clicking the notice (or the tray
+    /// menu item) restarts it as administrator.
+    /// </summary>
+    private void ShowAdministratorNotice(GameEntry game)
+    {
+        if (Elevated)
+        {
+            ShowBalloon(5000, $"{game.Name} can't be changed",
+                "Windows refused to let Game Backdrop change the game's window, even running as administrator.",
+                ToolTipIcon.Warning);
+            return;
+        }
+        _restartItem.Visible = true;
+        ShowBalloon(10000, $"{game.Name} runs as administrator",
+            "Game Backdrop can't change the game's window unless it runs as administrator too. Click here to restart Game Backdrop as administrator.",
+            ToolTipIcon.Info, offersRestart: true);
+    }
+
+    /// <summary>Show a tray notice. A click on it restarts the app as administrator only if this one offered that.</summary>
+    private void ShowBalloon(int timeout, string title, string text, ToolTipIcon icon, bool offersRestart = false)
+    {
+        _balloonOffersRestart = offersRestart;
+        _icon.ShowBalloonTip(timeout, title, text, icon);
+    }
+
+    /// <summary>
+    /// Put every game back, then start an elevated copy (the UAC prompt) and quit. The new copy
+    /// saves each window as it finds it as the original, so it is started only once every game is
+    /// back; it is told to take over, and waits for this one to release the single-instance
+    /// guard, so the two never both act on a window. A game that can't be put back, or a declined
+    /// prompt, leaves this copy running, with its games changed again.
+    /// </summary>
+    private void RestartAsAdministrator()
+    {
+        if (_restarting || Elevated) return;
+        _restarting = true;
+        var result = _controller.HandOver(StartElevatedCopy, RestoreRetries, () => Thread.Sleep(RestoreRetryDelay));
+        if (result.HandedOver)
+        {
+            ExitThread();
+            return;
+        }
+        _restarting = false;
+        if (result.NotRestored.Count > 0)
+        {
+            ShowBalloon(10000, "Couldn't restart as administrator",
+                $"These game windows couldn't be put back first, so Game Backdrop carries on as it was:\n{Names(result.NotRestored)}",
+                ToolTipIcon.Warning);
+        }
+    }
+
+    /// <summary>Start the elevated copy that takes over. False if it didn't start (the UAC prompt was declined, or it failed).</summary>
+    private bool StartElevatedCopy()
+    {
+        var start = new ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = true, Verb = "runas" };
+        start.ArgumentList.Add(Program.TakeoverFlag);
+        if (_settingsArgument is not null)
+        {
+            start.ArgumentList.Add("--settings");
+            start.ArgumentList.Add(_settingsArgument);
+        }
+        try
+        {
+            using var elevated = Process.Start(start);
+        }
+        catch (Win32Exception e) when (e.NativeErrorCode == ErrorCancelled)
+        {
+            return false;
+        }
+        catch (Win32Exception e)
+        {
+            ShowBalloon(5000, "Game Backdrop", $"Couldn't restart as administrator: {e.Message}", ToolTipIcon.Warning);
+            return false;
+        }
+        return true;
     }
 
     protected override void ExitThreadCore()
@@ -166,9 +268,9 @@ internal sealed class TrayApplication : ApplicationContext
     private IReadOnlyList<TrackedWindow> StopAndRestore(bool retry)
     {
         var notRestored = _controller.Stop();
-        for (var attempt = 0; retry && attempt < 3 && notRestored.Count > 0; attempt++)
+        for (var attempt = 0; retry && attempt < RestoreRetries && notRestored.Count > 0; attempt++)
         {
-            Thread.Sleep(200);
+            Thread.Sleep(RestoreRetryDelay);
             notRestored = _controller.Stop();
         }
         return notRestored;

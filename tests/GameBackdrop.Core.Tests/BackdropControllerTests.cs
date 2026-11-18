@@ -655,6 +655,102 @@ public sealed class BackdropControllerTests
     }
 
     [Fact]
+    public void A_game_running_as_administrator_is_left_untouched_and_raises_the_administrator_notice()
+    {
+        var controller = StartController();
+        var notices = new List<GameEntry>();
+        controller.GameRunsAsAdministrator += notices.Add;
+
+        var game = _desktop.OpenWindowed(_desktop.StartProcess(Dota, elevated: true), new Size(800, 600), left: 50, top: 60);
+
+        AssertUntouched(game, new WindowFrame(FakeWindowSystem.Captioned, Rect.FromPosition(50, 60, new Size(816, 639))));
+        Assert.Equal("Dota 2", Assert.Single(notices).DisplayName);
+        Assert.Empty(_desktop.Backdrops);
+    }
+
+    [Fact]
+    public void A_game_running_as_administrator_is_not_retried_as_its_window_is_shown_activated_or_moved()
+    {
+        var controller = StartController();
+        var notices = 0;
+        controller.GameRunsAsAdministrator += _ => notices++;
+        var game = _desktop.OpenWindowed(_desktop.StartProcess(Dota, elevated: true), new Size(800, 600));
+        var attempts = _desktop.FrameChanges.Count;
+
+        _desktop.Hide(game);
+        _desktop.Show(game);
+        _desktop.UserActivates(game);
+        _desktop.Move(game, Rect.FromPosition(2000, 0, new Size(816, 639))); // to the other monitor
+        _desktop.Minimise(game);
+        _desktop.Restore(game);
+
+        Assert.Equal(attempts, _desktop.FrameChanges.Count);
+        Assert.Equal(1, notices);
+        Assert.True(game.HasBorder);
+    }
+
+    [Fact]
+    public void The_administrator_notice_comes_once_per_launch_even_when_the_game_opens_another_window()
+    {
+        var controller = StartController();
+        var notices = 0;
+        controller.GameRunsAsAdministrator += _ => notices++;
+        var process = _desktop.StartProcess(Dota, elevated: true);
+        var splash = _desktop.OpenPopup(process, Rect.FromPosition(700, 400, new Size(500, 300)));
+
+        _desktop.Close(splash); // the launcher closes before the real game window shows
+        var main = _desktop.OpenWindowed(process, new Size(1280, 720));
+        _desktop.OpenWindowed(process, new Size(1600, 900)); // and a later, larger one replaces it
+
+        Assert.Equal(1, notices);
+        Assert.True(main.HasBorder);
+    }
+
+    [Fact]
+    public void Each_launch_of_a_game_running_as_administrator_gets_its_own_notice()
+    {
+        var controller = StartController();
+        var notices = 0;
+        controller.GameRunsAsAdministrator += _ => notices++;
+        var first = _desktop.StartProcess(Dota, elevated: true);
+        _desktop.Close(_desktop.OpenWindowed(first, new Size(800, 600)));
+
+        var second = _desktop.StartProcess(Dota, elevated: true);
+        _desktop.Close(_desktop.OpenWindowed(second, new Size(800, 600)));
+        // Windows recycles process ids: a third launch with the first one's id is still a new launch.
+        _desktop.OpenWindowed(_desktop.StartProcess(Dota, elevated: true, reusingIdOf: first), new Size(800, 600));
+
+        Assert.Equal(3, notices);
+    }
+
+    [Fact]
+    public void Each_game_running_as_administrator_gets_its_own_notice()
+    {
+        var controller = StartController();
+        var notices = new List<string?>();
+        controller.GameRunsAsAdministrator += g => notices.Add(g.DisplayName);
+
+        _desktop.OpenWindowed(_desktop.StartProcess(Dota, elevated: true), new Size(800, 600));
+        _desktop.OpenWindowed(_desktop.StartProcess(Novel, elevated: true), new Size(1280, 720));
+        _desktop.OpenWindowed(_desktop.StartProcess(Novel), new Size(1280, 720));
+
+        Assert.Equal(["Dota 2", "Novel"], notices);
+    }
+
+    [Fact]
+    public void A_game_running_as_administrator_found_at_start_raises_the_notice()
+    {
+        _desktop.OpenWindowed(_desktop.StartProcess(Dota, elevated: true), new Size(800, 600));
+        var controller = new BackdropController(_desktop, new GameList(_games));
+        var notices = 0;
+        controller.GameRunsAsAdministrator += _ => notices++;
+
+        controller.Start();
+
+        Assert.Equal(1, notices);
+    }
+
+    [Fact]
     public void Showing_a_restyled_game_again_does_not_restyle_it_twice()
     {
         var controller = StartController();
