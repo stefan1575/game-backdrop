@@ -67,6 +67,29 @@ public sealed class Win32WindowSystemTests : IDisposable
     }
 
     [Fact]
+    public void An_open_window_is_listed_once_with_its_title_and_exe_and_the_app_s_own_windows_are_not()
+    {
+        using var second = StartTestWindow("--size 640x480");
+        WaitFor(() => TestWindowOf(second.Id), "the second test window to open");
+        var ownWindow = CreateWindowEx(0, "STATIC", "Game Backdrop own window", WS_POPUP | WS_VISIBLE, 0, 0, 16, 16, 0, 0, 0, 0);
+        try
+        {
+            var listed = OpenWindows.List();
+
+            var exe = _testWindow.MainModule!.FileName;
+            var testWindow = Assert.Single(listed, w => string.Equals(w.ExePath, exe, StringComparison.OrdinalIgnoreCase));
+            Assert.Equal("Game Backdrop test window", testWindow.Title);
+            Assert.DoesNotContain(listed, w => w.Title == "Game Backdrop own window");
+            Assert.All(listed, w => Assert.False(string.IsNullOrWhiteSpace(w.Title)));
+        }
+        finally
+        {
+            DestroyWindow(ownWindow);
+            second.Kill();
+        }
+    }
+
+    [Fact]
     public void The_foreground_window_is_the_one_the_user_is_in()
     {
         if (!TryMakeForeground(_hwnd))

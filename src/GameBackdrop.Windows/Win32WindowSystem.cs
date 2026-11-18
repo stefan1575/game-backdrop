@@ -377,7 +377,7 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
     /// The process's exe path and start time (a FILETIME), each null or 0 when it can't be read.
     /// Both are queries on a limited-information handle; nothing is read from the process.
     /// </summary>
-    private static (string? Path, long Started) ProcessDetails(uint processId)
+    internal static (string? Path, long Started) ProcessDetails(uint processId)
     {
         var process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, processId);
         if (process == 0) return (null, 0);

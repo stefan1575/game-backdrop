@@ -144,6 +144,7 @@ public sealed class BackdropController(IWindowSystem windows, GameList games, Ti
 
     private readonly TimeProvider _time = time ?? TimeProvider.System;
     private readonly Dictionary<WindowHandle, TrackedWindow> _tracked = [];
+    private GameList _games = games;
     private bool _running;
     // Where the controller has the cursor kept, and for which game window; null while it leaves
     // the cursor alone.
@@ -217,6 +218,66 @@ public sealed class BackdropController(IWindowSystem windows, GameList games, Ti
         }
         return notRestored;
     }
+
+    /// <summary>
+    /// Take a changed game list (from the list window). A tracked game that is off the list or
+    /// switched off loses its backdrop and is put back as it was; one that can't be put back yet
+    /// keeps its original, and is tried again by the next list change and on quit. A game still
+    /// on the list keeps its backdrop and takes its entry's new settings (the mouse kept inside or
+    /// freed at once). Then, while running, the listed games already open and not yet tracked are
+    /// handled, as at <see cref="Start"/>.
+    /// </summary>
+    public void UpdateGames(GameList games)
+    {
+        _games = games;
+        foreach (var tracked in _tracked.Values.ToList())
+        {
+            var entry = tracked.State == TrackedState.RestorePending ? null : games.FindEnabled(tracked.ProcessPath);
+            if (entry is null) PutBack(tracked);
+            else Save(tracked with { Game = entry });
+        }
+        if (_running)
+        {
+            // A game that kept its window through this change keeps that window: none of its other
+            // windows takes over, as a later window would (a list change is no new window). A game
+            // tracked anew here (added, or switched back on) chooses among its windows as at Start,
+            // so its main window wins over a splash listed before it.
+            var kept = _tracked.Values.Where(t => t.State != TrackedState.RestorePending).Select(t => t.Run).ToHashSet();
+            foreach (var window in windows.TopLevelWindows())
+            {
+                // A window already tracked keeps what it has.
+                if (!_tracked.ContainsKey(window)) Consider(window, keptRuns: kept);
+            }
+            // As at Start: a game tracked anew while in front gets no Foreground event until the user comes back to it.
+            if (windows.ForegroundWindow() is { } foreground && _tracked.TryGetValue(foreground, out var inFront)) NoteInFront(inFront);
+        }
+        UpdateCursorClip();
+    }
+
+    /// <summary>
+    /// Stop backdropping a window that left the list: destroy its backdrop and put it back. One
+    /// that can't be put back yet stays as <see cref="TrackedState.RestorePending"/>, for a later
+    /// try; a released one (fullscreen by its own choice) is only owed its style or unmark then,
+    /// not its original frame.
+    /// </summary>
+    private void PutBack(TrackedWindow tracked)
+    {
+        var left = TryRestore(DropBackdrop(tracked));
+        if (left is null) Forget(tracked);
+        else Save(AsRestorePending(left));
+    }
+
+    /// <summary>
+    /// A window that couldn't be put back yet, kept for a later try. Whether its frame is still
+    /// owed comes from the state it had when it first left: a restyled one is owed its original
+    /// frame until a try puts it back; a released one (fullscreen by its own choice) never was. A
+    /// record already pending keeps what it owes, since its state no longer says which it was.
+    /// </summary>
+    private static TrackedWindow AsRestorePending(TrackedWindow left) => left with
+    {
+        State = TrackedState.RestorePending,
+        FrameRestored = left.FrameRestored || left.State is not (TrackedState.Restyled or TrackedState.RestorePending),
+    };
 
     /// <summary>
     /// The hotkey: turn the backdrop off for the game in front (its window put back as it was, the
@@ -334,7 +395,10 @@ public sealed class BackdropController(IWindowSystem windows, GameList games, Ti
         windows.Activate(tracked.Window);
     }
 
-    private void Consider(WindowHandle handle)
+    /// <param name="keptRuns">Game runs whose tracked window this window may not take over from;
+    /// any other run's tracked window (a launcher or splash screen) it may, by
+    /// <see cref="Replaces"/>. Null: none are kept.</param>
+    private void Consider(WindowHandle handle, IReadOnlySet<GameRun>? keptRuns = null)
     {
         if (TryGetLive(handle, out var known, out var live))
         {
@@ -355,11 +419,11 @@ public sealed class BackdropController(IWindowSystem windows, GameList games, Ti
         ForgetEndedRuns(run);
 
         if (!IsCandidate(info)) return;
-        var game = games.FindEnabled(info.ProcessPath);
+        var game = _games.FindEnabled(info.ProcessPath);
         if (game is null) return;
 
         var current = _tracked.Values.FirstOrDefault(t => t.Run == run && t.State != TrackedState.RestorePending);
-        if (current is not null && !Replaces(info, current)) return;
+        if (current is not null && (keptRuns?.Contains(run) == true || !Replaces(info, current))) return;
         if (_toggledOff.Contains(run))
         {
             // Toggled off is the run's, not its splash's or any one window's: the new window is
@@ -374,7 +438,7 @@ public sealed class BackdropController(IWindowSystem windows, GameList games, Ti
             var left = TryRestore(current);
             if (left is null) _tracked.Remove(current.Window);
             // A retry puts back what this try owed: a released splash keeps the frame it set itself.
-            else _tracked[current.Window] = left with { State = TrackedState.RestorePending, FrameRestored = left.FrameRestored || left.State != TrackedState.Restyled };
+            else _tracked[current.Window] = AsRestorePending(left);
             // Putting the splash back took port calls: meanwhile the candidate can have changed,
             // or closed and its handle gone to another window. Decide on it as it is now.
             if (DescribeIfStill(info.Handle, info.Lifetime) is not { } now || !IsCandidate(now)) return;

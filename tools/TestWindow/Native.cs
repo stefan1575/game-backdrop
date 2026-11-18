@@ -98,11 +98,11 @@ internal static class Native
     [DllImport("user32.dll")] public static extern bool ShowWindow(nint hwnd, int cmd);
     [DllImport("user32.dll")] public static extern bool DestroyWindow(nint hwnd);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(nint hwnd);
-    [DllImport("user32.dll")] public static extern int GetMessage(out MSG msg, nint hwnd, uint min, uint max);
+    [DllImport("user32.dll", EntryPoint = "GetMessageW")] public static extern int GetMessage(out MSG msg, nint hwnd, uint min, uint max);
     [DllImport("user32.dll")] public static extern bool TranslateMessage(ref MSG msg);
-    [DllImport("user32.dll")] public static extern nint DispatchMessage(ref MSG msg);
+    [DllImport("user32.dll", EntryPoint = "DispatchMessageW")] public static extern nint DispatchMessage(ref MSG msg);
     [DllImport("user32.dll")] public static extern void PostQuitMessage(int code);
-    [DllImport("user32.dll")] public static extern nint DefWindowProc(nint hwnd, uint msg, nint wParam, nint lParam);
+    [DllImport("user32.dll", EntryPoint = "DefWindowProcW")] public static extern nint DefWindowProc(nint hwnd, uint msg, nint wParam, nint lParam);
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] public static extern nint GetWindowLongPtr(nint hwnd, int index);
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] public static extern nint SetWindowLongPtr(nint hwnd, int index, nint value);
     [DllImport("user32.dll")] public static extern bool SetWindowPos(nint hwnd, nint after, int x, int y, int cx, int cy, uint flags);

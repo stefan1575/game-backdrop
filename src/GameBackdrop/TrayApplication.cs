@@ -15,6 +15,8 @@ internal sealed class TrayApplication : ApplicationContext
     private readonly NotifyIcon _icon;
     private readonly Win32WindowSystem _windows;
     private readonly BackdropController _controller;
+    private readonly GameListModel _games;
+    private GameListForm? _list;
     private readonly GlobalHotkey? _hotkey;
     private bool _failureReported;
     private bool _crashing;
@@ -25,11 +27,18 @@ internal sealed class TrayApplication : ApplicationContext
         // the controller starts (and may get events) before that.
         SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
 
-        var loaded = settings.Load();
+        _games = GameListModel.Load(settings);
         _windows = new Win32WindowSystem();
-        _controller = new BackdropController(_windows, new GameList(loaded.Settings.Games));
+        _controller = new BackdropController(_windows, _games.ToGameList());
+        // Each saved change reaches the running controller at once: a game switched off or
+        // removed is put back, one switched on or added is handled if it's running.
+        _games.Changed += () => _controller.UpdateGames(_games.ToGameList());
 
         var menu = new ContextMenuStrip();
+        var openList = new ToolStripMenuItem("Open list", null, (_, _) => ShowList());
+        openList.Font = new Font(openList.Font, FontStyle.Bold);
+        menu.Items.Add(openList);
+        menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Quit", null, (_, _) => ExitThread());
         _icon = new NotifyIcon
         {
@@ -37,6 +46,10 @@ internal sealed class TrayApplication : ApplicationContext
             Text = "Game Backdrop",
             ContextMenuStrip = menu,
             Visible = true,
+        };
+        _icon.MouseDoubleClick += (_, e) =>
+        {
+            if (e.Button == MouseButtons.Left) ShowList();
         };
 
         Application.ThreadException += (_, e) => Crash(e.Exception);
@@ -46,14 +59,15 @@ internal sealed class TrayApplication : ApplicationContext
         // One balloon at a time shows, so every startup notice goes in the same one (Windows cuts
         // its text at 255 characters; both together only come with a corrupt file).
         var notices = new List<string>();
-        if (loaded.Status == SettingsLoadStatus.Corrupt)
-            notices.Add($"The settings file couldn't be read, so no games are listed. It is left as it is: {settings.FilePath}");
+        if (_games.LoadStatus == SettingsLoadStatus.Corrupt)
+            notices.Add($"The settings file couldn't be read, so no games are listed. It is left as it is until the list " +
+                $"is changed, and then kept beside it as a .corrupt copy: {settings.FilePath}");
 
         _controller.Start();
 
-        var hotkey = Hotkey.FromSettings(loaded.Settings.Hotkey, out var understood);
+        var hotkey = Hotkey.FromSettings(_games.Hotkey, out var understood);
         if (!understood)
-            notices.Add($"The hotkey \"{loaded.Settings.Hotkey}\" in the settings isn't one the app can read, so {hotkey} is used.");
+            notices.Add($"The hotkey \"{_games.Hotkey}\" in the settings isn't one the app can read, so {hotkey} is used.");
         // Another app holding the keys means no toggle, and a notice: never a crash.
         _hotkey = GlobalHotkey.TryRegister(hotkey, _controller.ToggleBackdrop);
         if (_hotkey is null)
@@ -61,6 +75,19 @@ internal sealed class TrayApplication : ApplicationContext
 
         if (notices.Count > 0)
             _icon.ShowBalloonTip(5000, "Game Backdrop", string.Join("\n\n", notices), ToolTipIcon.Warning);
+    }
+
+    /// <summary>Open the game list window, or bring it to the front if it's open.</summary>
+    public void ShowList()
+    {
+        if (_list is null || _list.IsDisposed)
+        {
+            _list = new GameListForm(_games);
+            _list.FormClosed += (_, _) => _list = null;
+        }
+        _list.Show();
+        if (_list.WindowState == FormWindowState.Minimized) _list.WindowState = FormWindowState.Normal;
+        _list.Activate();
     }
 
     protected override void ExitThreadCore()
@@ -75,6 +102,7 @@ internal sealed class TrayApplication : ApplicationContext
     {
         if (disposing)
         {
+            _list?.Dispose();
             _hotkey?.Dispose();
             StopController();
             _icon.Dispose();
@@ -111,7 +139,7 @@ internal sealed class TrayApplication : ApplicationContext
     }
 
     private static string Names(IEnumerable<TrackedWindow> windows) =>
-        string.Join("\n", windows.Select(t => t.Game.DisplayName ?? t.Game.ExePath));
+        string.Join("\n", windows.Select(t => t.Game.Name));
 
     private void Crash(Exception? exception)
     {
