@@ -21,6 +21,10 @@ Scenarios live in `Program.cs` (`main`: windowed, menus, fullscreen, Quit; `wrap
   pure-black shares of the taskbar strip and the rest of the monitor.
 - `fgprobe` (PR #12 diagnosis): Z positions of the game and its backdrop through activation,
   minimise and restore, another app, hide and show. Log only.
+- `live` (PR #14, `pr-14/`): a game switching itself to fullscreen, back to windowed and to a
+  new resolution; a maximised frameless game that goes topmost and fills its monitor; a game
+  disabled (as under a modal dialog) at Quit; a fullscreen game opened while the app runs. Run on
+  main for the `before-` pictures and on the PR for the `after-` ones.
 - `fgprobe2` (PR #12 diagnosis, defect A): a harness window is the foreground while the game is
   restyled, then the game is activated; three rounds. Log only.
 

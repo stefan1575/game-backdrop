@@ -9,7 +9,7 @@ using System.Windows.Automation;
 
 // Usage: Evidence <outDir> <scenario> <appExe> <testWindowExe> <settingsPath>
 // scenario "main": the PR's manual checks on the given app. Scenario "wrap": only the wrapped-menu window.
-// Scenario "backdrop": PR #12's black backdrop checks, then one fgprobe2 round. "fgprobe", "fgprobe2": PR #12 diagnosis.
+// Scenario "live": PR #14's live changes, run on main and on the PR. Scenario "backdrop": PR #12's black backdrop checks, then one fgprobe2 round. "fgprobe", "fgprobe2": PR #12 diagnosis.
 W.PerMonitorDpiAware(); // rects and screen captures in physical pixels
 var (outDir, scenario, appExe, testExe, settingsPath) = (args[0], args[1], args[2], args[3], args[4]);
 Directory.CreateDirectory(outDir);
@@ -458,6 +458,77 @@ try
         Quit(app);
     }
     else if (scenario == "fgprobe2") FgProbe2(3);
+    else if (scenario == "live")
+    {
+        // PR #14 (#4): a game changing its own window while the app runs. Run once on main (before)
+        // and once on the PR's build (after); each picture is the test window's own pixels on an
+        // outline of the monitor, its caption saying whether a backdrop covers the monitor.
+        string Backdrop(int pid) => W.Backdrops(pid).Any(b => W.IsVisible(b) && W.Describe(b).Outer == new W.R(screen.Bounds.X, screen.Bounds.Y, screen.Bounds.Width, screen.Bounds.Height)) ? "black backdrop covers the monitor" : "no backdrop";
+        void Key(nint h, char k) { W.PostMessage(h, 0x0100, k, 0); Thread.Sleep(1200); } // WM_KEYDOWN
+
+        // 1-4. A windowed game goes fullscreen, windowed again, changes resolution; then Quit.
+        // Each part closes its test window, so the next app run sees only its own game.
+        void Close(Process p) { p.Kill(); p.WaitForExit(); Thread.Sleep(600); }
+        var aProc = Launch(testExe, "--size 800x600");
+        var a = WaitWindow(aProc);
+        var sa = W.Describe(a).Style;
+        var app = Launch(appExe, $"--settings \"{settingsPath}\"");
+        WaitChanged(a, sa);
+        WaitBackdrop(app.Id);
+        Key(a, 'F');
+        Shot("1-game-goes-fullscreen", $"1. Restyled game switches itself to borderless fullscreen (F): {Backdrop(app.Id)}", a);
+        Key(a, 'W');
+        Shot("2-game-goes-windowed-again", $"2. Then back to windowed (W): {Backdrop(app.Id)}", a);
+        Key(a, 'R');
+        Shot("3-game-changes-resolution", $"3. Then a resolution change to 1280x720 (R): {Backdrop(app.Id)}", a);
+        Quit(app);
+        Shot("4-after-quit", "4. App quit from its tray menu", a);
+        Close(aProc);
+
+        // 5-6. A maximised frameless game, stripped; it goes topmost and fills the monitor itself.
+        var bProc = Launch(testExe, "--size 800x600");
+        var b = WaitWindow(bProc);
+        var work = screen.WorkingArea;
+        W.SetStyle(b, 0x80000000 | 0x10000000 | 0x01000000); // WS_POPUP | WS_VISIBLE | WS_MAXIMIZE
+        W.SetRect(b, work.X, work.Y, work.Width, work.Height);
+        Thread.Sleep(600);
+        Shot("5-maximised-frameless-before-app", "5. Frameless maximised game covering the work area, app not running", b);
+        var sb = W.Describe(b).Style;
+        var app2 = Launch(appExe, $"--settings \"{settingsPath}\"");
+        WaitChanged(b, sb);
+        WaitBackdrop(app2.Id);
+        W.SetTopmost(b, true);
+        var mon = screen.Bounds;
+        W.SetRect(b, mon.X, mon.Y, mon.Width, mon.Height);
+        Thread.Sleep(1500);
+        Shot("6-maximised-game-fills-monitor", $"6. App stripped it (WS_MAXIMIZE off); it went topmost and filled the monitor itself: {Backdrop(app2.Id)}", b);
+        Quit(app2);
+        Shot("7-maximised-after-quit", "7. App quit from its tray menu", b);
+        W.SetTopmost(b, false);
+        Close(bProc);
+
+        // 8. A game a modal dialog disabled while the app ran, at Quit.
+        var cProc = Launch(testExe, "--size 800x600");
+        var c = WaitWindow(cProc);
+        var sc = W.Describe(c).Style;
+        var app3 = Launch(appExe, $"--settings \"{settingsPath}\"");
+        WaitChanged(c, sc);
+        WaitBackdrop(app3.Id);
+        W.Enable(c, false); // WS_DISABLED, as under a modal dialog
+        Thread.Sleep(800);
+        Quit(app3);
+        Shot("8-disabled-game-after-quit", "8. Game disabled (as under a modal dialog) when the app quit: title bar back; is it still disabled?", c);
+        W.Enable(c, true);
+        Close(cProc);
+
+        // 9. A fullscreen game opened while the app runs is left alone.
+        var app4 = Launch(appExe, $"--settings \"{settingsPath}\"");
+        Thread.Sleep(1500);
+        var full = WaitWindow(Launch(testExe, "--mode fullscreen"));
+        Thread.Sleep(1500);
+        Shot("9-fullscreen-left-alone", $"9. Borderless-fullscreen game opened while the app runs: {Backdrop(app4.Id)}", full);
+        Quit(app4);
+    }
     else if (scenario == "wrap")
     {
         var wrap = WaitWindow(Launch(testExe, "--size 400x600 --menu-items 14"));
@@ -503,6 +574,16 @@ static class W
         SetWindowLongPtr(h, -20, (nint)((uint)GetWindowLongPtr(h, -20) | bits));
         SetWindowPos(h, 0, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020); // NOSIZE NOMOVE NOZORDER NOACTIVATE FRAMECHANGED
     }
+
+    public static void SetStyle(nint h, uint style)
+    {
+        SetWindowLongPtr(h, -16, (nint)style);
+        SetWindowPos(h, 0, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020);
+    }
+    public static void SetRect(nint h, int x, int y, int w, int hgt) => SetWindowPos(h, 0, x, y, w, hgt, 0x0004 | 0x0010); // NOZORDER NOACTIVATE
+    public static void SetTopmost(nint h, bool on) => SetWindowPos(h, on ? -1 : -2, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010); // HWND_TOPMOST / NOTOPMOST
+    [DllImport("user32.dll")] static extern bool EnableWindow(nint h, bool enable);
+    public static void Enable(nint h, bool on) => EnableWindow(h, on);
 
     public static void Show(nint h, int cmd) => ShowWindow(h, cmd);
 
