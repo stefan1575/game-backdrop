@@ -124,6 +124,8 @@ public sealed record TrackedWindow(
 /// as <c>behind</c>, <see cref="IWindowSystem.MarkFullscreen"/>, <see cref="IWindowSystem.Activate"/>)
 /// comes right after a fresh <see cref="IWindowSystem.Describe"/> of that handle that confirms the
 /// lifetime the controller means to act on, with no other port call in between.
+/// <see cref="IWindowSystem.ClipCursor"/> changes no window, but its area comes from a Describe
+/// of the game in front made just before it, for the same reason.
 /// </remarks>
 public sealed class BackdropController(IWindowSystem windows, GameList games, TimeProvider? time = null)
 {
@@ -143,6 +145,12 @@ public sealed class BackdropController(IWindowSystem windows, GameList games, Ti
     private readonly TimeProvider _time = time ?? TimeProvider.System;
     private readonly Dictionary<WindowHandle, TrackedWindow> _tracked = [];
     private bool _running;
+    // Where the controller has the cursor kept, and for which game window; null while it leaves
+    // the cursor alone.
+    private CursorClip? _clip;
+
+    /// <summary>The cursor is kept inside <paramref name="Area"/>, the client area of a game window.</summary>
+    private readonly record struct CursorClip(WindowHandle Window, long Lifetime, Rect Area);
     // The game runs that have been in front, least recent first: the toggle acts on the most
     // recent one still with a window when no game is in front. By run, not window: a main window
     // replacing its splash takes the splash's place. A run whose windows are all gone keeps its
@@ -164,6 +172,7 @@ public sealed class BackdropController(IWindowSystem windows, GameList games, Ti
         foreach (var window in windows.TopLevelWindows()) Consider(window);
         // A game already in front gets no Foreground event until the user leaves it and comes back.
         if (windows.ForegroundWindow() is { } foreground && _tracked.TryGetValue(foreground, out var inFront)) NoteInFront(inFront);
+        UpdateCursorClip();
     }
 
     /// <summary>
@@ -179,6 +188,7 @@ public sealed class BackdropController(IWindowSystem windows, GameList games, Ti
             windows.WindowEvent -= OnWindowEvent;
             windows.BackdropClicked -= OnBackdropClicked;
         }
+        ReleaseCursor();
         // Nothing moves a backdrop once events stop, so none stays, even behind a game that
         // couldn't be put back.
         foreach (var tracked in _tracked.Values.ToList()) DropBackdrop(tracked);
@@ -268,6 +278,15 @@ public sealed class BackdropController(IWindowSystem windows, GameList games, Ti
     }
 
     private void OnWindowEvent(WindowEvent e)
+    {
+        HandleWindowEvent(e);
+        // Whatever changed which window is in front, or a game's state, place or size, can change
+        // where the cursor belongs. Other windows' events (moves, mostly) can't.
+        if (e.Kind == WindowEventKind.Foreground || _tracked.ContainsKey(e.Window) || _clip?.Window == e.Window)
+            UpdateCursorClip();
+    }
+
+    private void HandleWindowEvent(WindowEvent e)
     {
         switch (e.Kind)
         {
@@ -520,6 +539,46 @@ public sealed class BackdropController(IWindowSystem windows, GameList games, Ti
         ShowBackdrop(tracked, info);
         if (StillLive(tracked) is null) return;
         if (windows.MarkFullscreen(tracked.Window, true) == ChangeResult.Ok) Save(tracked with { MarkedFullscreen = true });
+        // A game given its backdrop while it is in front keeps the mouse inside at once.
+        UpdateCursorClip();
+    }
+
+    /// <summary>
+    /// Keep the cursor inside the game in front, or free it. It is kept inside a game's client
+    /// area while that game is the foreground window, on screen, restyled and backdropped, with
+    /// <see cref="GameEntry.KeepMouseInside"/> on; it follows the client area when that moves or
+    /// resizes. Anything else frees it: another app in front, the game minimised or hidden, its
+    /// backdrop gone, the game closed. Decided from the desktop as it is now, not from the event
+    /// that led here, so a late event never puts the clip on a game the user has left.
+    /// </summary>
+    private void UpdateCursorClip()
+    {
+        var wanted = WantedCursorClip();
+        if (wanted == _clip) return;
+        if (wanted is not { } clip)
+        {
+            ReleaseCursor();
+            return;
+        }
+        windows.ClipCursor(clip.Area);
+        _clip = clip;
+    }
+
+    private CursorClip? WantedCursorClip()
+    {
+        if (!_running || windows.ForegroundWindow() is not { } foreground) return null;
+        if (!TryGetLive(foreground, out var tracked, out var info)) return null;
+        if (!tracked.IsRestyledNow || tracked.Backdrop is null || !tracked.Game.KeepMouseInside) return null;
+        if (!info.IsVisible || info.IsMinimized) return null;
+        return new CursorClip(tracked.Window, tracked.Lifetime, info.Client);
+    }
+
+    /// <summary>Free the cursor, if the controller has it kept anywhere.</summary>
+    private void ReleaseCursor()
+    {
+        if (_clip is null) return;
+        windows.ReleaseCursor();
+        _clip = null;
     }
 
     /// <summary>Store the record as the window's current one.</summary>
@@ -790,6 +849,8 @@ public sealed class BackdropController(IWindowSystem windows, GameList games, Ti
     private TrackedWindow DropBackdrop(TrackedWindow tracked)
     {
         if (tracked.Backdrop is not { } backdrop) return tracked;
+        // The cursor is only ever kept inside a game while its backdrop is on.
+        if (_clip?.Window == tracked.Window) ReleaseCursor();
         windows.DestroyBackdrop(backdrop);
         var dropped = tracked with { Backdrop = null };
         if (_tracked.ContainsKey(tracked.Window)) _tracked[tracked.Window] = dropped;

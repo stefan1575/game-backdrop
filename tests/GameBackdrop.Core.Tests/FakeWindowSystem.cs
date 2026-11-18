@@ -8,7 +8,7 @@ namespace GameBackdrop.Core.Tests;
 /// <see cref="FakeWindowSystem.ThrowOnNext"/>) first, then the rest, which the fake also numbers
 /// (<see cref="FakeWindowSystem.AfterCall"/>).
 /// </summary>
-public enum PortCall { SetFrame, CreateBackdrop, ShowBackdrop, MarkFullscreen, TopLevelWindows, Describe, OuterSizeFor, HideBackdrop, DestroyBackdrop, Activate, ForegroundWindow }
+public enum PortCall { SetFrame, CreateBackdrop, ShowBackdrop, MarkFullscreen, TopLevelWindows, Describe, OuterSizeFor, HideBackdrop, DestroyBackdrop, Activate, ForegroundWindow, ClipCursor, ReleaseCursor }
 
 /// <summary>
 /// A scripted desktop: monitors, windows with styles and rects, one Z order (windows and
@@ -310,6 +310,30 @@ public sealed class FakeWindowSystem : IWindowSystem
         End(PortCall.ForegroundWindow);
         return handle;
     }
+
+    /// <summary>Where the cursor is kept, or null when it is free to go anywhere.</summary>
+    public Rect? CursorClip { get; private set; }
+
+    // The clip this port last set, so a release leaves another program's clip alone.
+    private Rect? _clipSet;
+
+    public void ClipCursor(Rect area)
+    {
+        Begin(PortCall.ClipCursor);
+        CursorClip = _clipSet = area;
+        End(PortCall.ClipCursor);
+    }
+
+    public void ReleaseCursor()
+    {
+        Begin(PortCall.ReleaseCursor);
+        if (CursorClip is not null && CursorClip == _clipSet) CursorClip = null;
+        _clipSet = null;
+        End(PortCall.ReleaseCursor);
+    }
+
+    /// <summary>Another program (a game that clips the cursor itself) keeps the cursor in <paramref name="area"/>.</summary>
+    public void SomeoneElseClipsCursor(Rect area) => CursorClip = area;
 
     public WindowInfo? Describe(WindowHandle handle)
     {

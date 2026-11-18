@@ -87,4 +87,18 @@ public interface IWindowSystem
     /// no window, <see cref="ChangeResult.Failed"/> if Windows refuses.
     /// </summary>
     ChangeResult Activate(WindowHandle window);
+
+    /// <summary>
+    /// Keep the cursor inside <paramref name="area"/> (screen coordinates; Windows trims it to the
+    /// screen). The cursor is one for the whole desktop: this replaces any clip in place, the
+    /// app's own earlier one included.
+    /// </summary>
+    void ClipCursor(Rect area);
+
+    /// <summary>
+    /// Free the cursor, if it is still held by this port's last <see cref="ClipCursor"/>. A clip
+    /// someone else set since (a game clipping the cursor itself) is left alone. Safe to call
+    /// when nothing is clipped.
+    /// </summary>
+    void ReleaseCursor();
 }
