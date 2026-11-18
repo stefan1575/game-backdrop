@@ -15,6 +15,8 @@ a message that says what changed and why. The queue runner on Stefan's PC review
 ## Build and test
 
 C# on .NET 10 (WinForms), SDK from scoop (`dotnet-sdk`).
+If `dotnet` reports no SDKs, put Scoop's SDK first on PATH for this shell:
+`$env:PATH = "$env:USERPROFILE\scoop\apps\dotnet-sdk\current;$env:PATH"`.
 
 ```
 dotnet build
@@ -29,8 +31,13 @@ in a settings file and start the app with `--settings <path>` to leave the real
 
 Screenshots (a visible change needs a before and after): use the evidence harness on the
 `evidence` branch (`harness/README.md`). Add a scenario for the PR, run it on `main` for `before-`
-and on the PR for `after-`, and publish with the queue runner's `evidence.py publish --into
-pr-<n>`. Never `evidence.py screen`: it captures Stefan's whole desktop, other programs included.
+and on the PR for `after-`, and publish from this repo with the queue runner's script:
+
+```powershell
+python3 "$env:USERPROFILE\Code\Personal\queue-runner\scripts\evidence.py" publish --repo . --into pr-<n> <png> [<png> ...]
+```
+
+Never `evidence.py screen`: it captures Stefan's whole desktop, other programs included.
 A state only Stefan can reach (a UAC prompt) is `Screenshot owed: <why>`.
 
 Layout: `src/GameBackdrop.Core` (no Win32: settings, game list, classifier, placement, and the
@@ -51,7 +58,7 @@ built first in the same configuration).
 - The decisions (fullscreen or windowed, where to centre, which monitor) live in a core with no
   Win32 calls, so they're unit-tested; the Win32 layer stays thin.
 
-## Agent skills
+## Agent docs
 
 ### Issue tracker
 
@@ -64,5 +71,4 @@ The five default labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready
 
 ### Domain docs
 
-Single-context: `GLOSSARY.md` and `docs/adr/` at the root, created when needed. See
-`docs/agents/domain.md`.
+Before exploring code, read `docs/agents/domain.md` for the repo's optional glossary and ADRs.
