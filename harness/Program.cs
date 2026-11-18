@@ -631,6 +631,25 @@ try
         Shot("9-fullscreen-left-alone", $"9. Borderless-fullscreen game opened while the app runs: {Backdrop(app4.Id)}", full);
         Quit(app4);
     }
+    else if (scenario == "always-admin")
+    {
+        // PR for #31 (always run as administrator): the tray menu, with no game running as
+        // administrator. On main the one-off "Restart as administrator" item stays hidden until a
+        // notice; on the PR the "Always run as administrator" check item is always there. The
+        // menu's own rect, from the screen. A sixth argument names the pictures' prefix.
+        var prefix = args.Length > 5 ? args[5] : "shot";
+        File.WriteAllText(settingsPath, JsonSerializer.Serialize(new { games = Array.Empty<object>(), startAtLogon = false }));
+        var app = Launch(appExe, $"--settings \"{settingsPath}\"");
+        Thread.Sleep(2500);
+        var menu = U.OpenTrayMenu(app);
+        var items = U.MenuItems(menu);
+        log.Add(new { name = "tray-menu", items });
+        Console.WriteLine($"tray menu: {string.Join(", ", items)}");
+        U.SaveCaptioned(Path.Combine(outDir, $"{prefix}-tray-menu.png"), U.FromScreen(menu), "Tray icon's menu (right-click), no game running as administrator");
+        W.PostMessage(menu, 0x0100, 0x1B, 0); // Escape closes the menu
+        Thread.Sleep(500);
+        Quit(app);
+    }
     else if (scenario == "list")
     {
         // PR #18 (the game list window): the tray menu, the list, the "Add from open windows"

@@ -7,7 +7,7 @@ tray menu (UI Automation).
 
 ```
 dotnet build -c Release -o out
-out\Evidence.exe <outDir> <main|wrap|round3|backdrop|fgprobe|fgprobe2|live|list> <GameBackdrop.exe> <TestWindow.exe> <temp settings.json>
+out\Evidence.exe <outDir> <main|wrap|round3|backdrop|fgprobe|fgprobe2|live|list|always-admin> <GameBackdrop.exe> <TestWindow.exe> <temp settings.json>
 ```
 
 Scenarios live in `Program.cs` (`main`: windowed, menus, fullscreen, Quit; `wrap`: wrapped menu;
@@ -51,3 +51,5 @@ black backdrop (#3), a picture needs the backdrop too: capture that monitor from
 and black. Say which way each picture was made.
 
 `side-by-side.ps1` and `grid.ps1` combine pictures for a before/after view.
+- `always-admin` (#31): the tray menu with no game running as administrator, from the screen over
+  the menu's own rect. A sixth argument names the prefix (`before` on main, `after` on the PR).
