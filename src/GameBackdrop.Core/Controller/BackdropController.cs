@@ -32,8 +32,24 @@ public enum TrackedState
     /// replaced while released only gets back the style or mark it was owed, not its frame.
     /// </summary>
     RestorePending,
+    /// <summary>
+    /// The user turned the backdrop off with the hotkey (<see cref="BackdropController.ToggleBackdrop"/>):
+    /// the window is back as it was, has no backdrop and isn't marked. The choice is the game
+    /// run's (<see cref="GameRun"/>), not the window's: it stays through every event and every
+    /// later window of the same run (a main window after its splash, even once the splash has
+    /// closed), until toggled on or the game is relaunched. Nothing is left to put back.
+    /// </summary>
+    ToggledOff,
 }
 
+/// <summary>
+/// One run of a game process: its id and when it started. Windows reuses process ids, so a
+/// relaunch can get the id of the run before it; the start time tells them apart.
+/// </summary>
+public readonly record struct GameRun(int ProcessId, long Started)
+{
+    public static GameRun Of(WindowInfo info) => new(info.ProcessId, info.ProcessStarted);
+}
 
 /// <summary>A game window the controller is tracking: one per game process.</summary>
 /// <param name="Lifetime">Which window behind <paramref name="Window"/> this is
@@ -70,6 +86,7 @@ public sealed record TrackedWindow(
     WindowHandle Window,
     int ProcessId,
     string? ProcessPath,
+    long ProcessStarted,
     GameEntry Game,
     TrackedState State,
     long Lifetime,
@@ -84,7 +101,17 @@ public sealed record TrackedWindow(
     bool EverRestyled = false,
     DateTimeOffset LastPlaced = default,
     int Fights = 0,
-    WindowStyle Owed = default);
+    WindowStyle Owed = default)
+{
+    public GameRun Run => new(ProcessId, ProcessStarted);
+
+    /// <summary>
+    /// The window has the controller's strip and place on it now. A restyled record whose frame
+    /// is back (a restore that left only its unmark to retry) is being put back, not restyled:
+    /// nothing may strip, centre, follow or mark it again.
+    /// </summary>
+    public bool IsRestyledNow => State == TrackedState.Restyled && !FrameRestored;
+}
 
 /// <summary>
 /// Turns window events into actions on the window system: a state machine per tracked game
@@ -116,6 +143,14 @@ public sealed class BackdropController(IWindowSystem windows, GameList games, Ti
     private readonly TimeProvider _time = time ?? TimeProvider.System;
     private readonly Dictionary<WindowHandle, TrackedWindow> _tracked = [];
     private bool _running;
+    // The game runs that have been in front, least recent first: the toggle acts on the most
+    // recent one still with a window when no game is in front. By run, not window: a main window
+    // replacing its splash takes the splash's place. A run whose windows are all gone keeps its
+    // place, since it can open another window, until its process id turns up on another run.
+    private readonly List<GameRun> _inFront = [];
+    // The game runs the user toggled off: every window of theirs is left as it is. Kept by run,
+    // past the window that was toggled, until toggled on or the process id turns up on another run.
+    private readonly HashSet<GameRun> _toggledOff = [];
 
     public IReadOnlyCollection<TrackedWindow> TrackedWindows => _tracked.Values;
 
@@ -127,6 +162,8 @@ public sealed class BackdropController(IWindowSystem windows, GameList games, Ti
         windows.WindowEvent += OnWindowEvent;
         windows.BackdropClicked += OnBackdropClicked;
         foreach (var window in windows.TopLevelWindows()) Consider(window);
+        // A game already in front gets no Foreground event until the user leaves it and comes back.
+        if (windows.ForegroundWindow() is { } foreground && _tracked.TryGetValue(foreground, out var inFront)) NoteInFront(inFront);
     }
 
     /// <summary>
@@ -171,6 +208,65 @@ public sealed class BackdropController(IWindowSystem windows, GameList games, Ti
         return notRestored;
     }
 
+    /// <summary>
+    /// The hotkey: turn the backdrop off for the game in front (its window put back as it was, the
+    /// black gone, the taskbar back), or on again if it is off. The game in front is the tracked
+    /// game that is the foreground window, else the one most recently in front. A game in its own
+    /// fullscreen mode, one the app may not touch, or no game at all: nothing changes.
+    /// </summary>
+    public void ToggleBackdrop()
+    {
+        if (!_running || !TryGetGameInFront(out var tracked, out var info)) return;
+        switch (tracked.State)
+        {
+            case TrackedState.Restyled:
+                ToggleOff(tracked);
+                break;
+            case TrackedState.ToggledOff:
+                // A window that isn't on screen has nowhere to be placed; the next press tries again.
+                if (!IsCandidate(info)) break;
+                Track(info, tracked.Game);
+                // On, unless nothing could be changed and the toggled-off record stays.
+                if (!(_tracked.TryGetValue(tracked.Window, out var now) && now.State == TrackedState.ToggledOff))
+                    _toggledOff.Remove(tracked.Run);
+                break;
+        }
+    }
+
+    private bool TryGetGameInFront([NotNullWhen(true)] out TrackedWindow? tracked, [NotNullWhen(true)] out WindowInfo? info)
+    {
+        // The foreground game wins even when it has nothing to toggle: the user is in it.
+        if (windows.ForegroundWindow() is { } foreground && TryGetLive(foreground, out tracked, out info)
+            && tracked.State != TrackedState.RestorePending)
+            return true;
+        for (var i = _inFront.Count - 1; i >= 0; i--)
+        {
+            var run = _inFront[i];
+            var window = _tracked.Values.FirstOrDefault(t => t.Run == run && t.State != TrackedState.RestorePending);
+            if (window is not null && TryGetLive(window.Window, out tracked, out info)) return true;
+        }
+        tracked = null;
+        info = null;
+        return false;
+    }
+
+    /// <summary>
+    /// Put the game back and take its backdrop away. A restore that fails part-way keeps what it
+    /// did, and the black while the frame isn't back, so the next press finishes it.
+    /// </summary>
+    private void ToggleOff(TrackedWindow tracked)
+    {
+        if (TryRestore(tracked) is { } left)
+        {
+            Save(left.FrameRestored ? DropBackdrop(left) : left);
+            return;
+        }
+        // Put back, or gone (StillLive forgets a gone window, its backdrop with it).
+        if (StillLive(tracked) is null) return;
+        Save(DropBackdrop(tracked) with { State = TrackedState.ToggledOff, FrameRestored = false, MarkedFullscreen = false, Owed = default });
+        _toggledOff.Add(tracked.Run);
+    }
+
     private void OnWindowEvent(WindowEvent e)
     {
         switch (e.Kind)
@@ -188,6 +284,7 @@ public sealed class BackdropController(IWindowSystem windows, GameList games, Ti
         if (!TryGetLive(e.Window, out var tracked, out var info)) return;
         // An event about an earlier window behind this handle, posted before it was destroyed.
         if (e.Lifetime != 0 && e.Lifetime != tracked.Lifetime) return;
+        if (e.Kind == WindowEventKind.Foreground) NoteInFront(tracked);
         if (e.Kind == WindowEventKind.LocationChanged)
         {
             Reassess(tracked, info);
@@ -235,15 +332,25 @@ public sealed class BackdropController(IWindowSystem windows, GameList games, Ti
         // Not tracked, or the tracked window is gone (and forgotten): whatever has the handle now is new.
         var info = windows.Describe(handle);
         if (info is null) return;
+        var run = GameRun.Of(info);
+        ForgetEndedRuns(run);
 
         if (!IsCandidate(info)) return;
         var game = games.FindEnabled(info.ProcessPath);
         if (game is null) return;
 
-        var current = _tracked.Values.FirstOrDefault(t => t.ProcessId == info.ProcessId && t.State != TrackedState.RestorePending);
+        var current = _tracked.Values.FirstOrDefault(t => t.Run == run && t.State != TrackedState.RestorePending);
+        if (current is not null && !Replaces(info, current)) return;
+        if (_toggledOff.Contains(run))
+        {
+            // Toggled off is the run's, not its splash's or any one window's: the new window is
+            // left as it is, and stays off. A toggled-off record has nothing to put back.
+            if (current is not null) _tracked.Remove(current.Window);
+            Save(NewRecord(info, game) with { State = TrackedState.ToggledOff });
+            return;
+        }
         if (current is not null)
         {
-            if (!Replaces(info, current)) return;
             current = DropBackdrop(current);
             var left = TryRestore(current);
             if (left is null) _tracked.Remove(current.Window);
@@ -300,10 +407,19 @@ public sealed class BackdropController(IWindowSystem windows, GameList games, Ti
     private static bool Replaces(WindowInfo candidate, TrackedWindow current) =>
         candidate.Style.HasCaption || candidate.Client.Size.Area > current.ClientSize.Area;
 
+    /// <summary>A record of the window as it is now, nothing changed yet.</summary>
+    private static TrackedWindow NewRecord(WindowInfo info, GameEntry game) =>
+        new(info.Handle, info.ProcessId, info.ProcessPath, info.ProcessStarted, game, TrackedState.Fullscreen,
+            info.Lifetime, info.Frame, info.Style.HasCaption, info.Client.Size, info.Monitor, KnownStyle: info.Style);
+
+    /// <summary>
+    /// Decide on a game window and, if it is windowed, restyle, centre and back it. For a
+    /// toggled-off game being toggled on, the window is taken as it is now (where the user left it
+    /// is its new original); if nothing could be changed, its toggled-off record stays.
+    /// </summary>
     private void Track(WindowInfo info, GameEntry game)
     {
-        var tracked = new TrackedWindow(info.Handle, info.ProcessId, info.ProcessPath, game, TrackedState.Fullscreen,
-            info.Lifetime, info.Frame, info.Style.HasCaption, info.Client.Size, info.Monitor, KnownStyle: info.Style);
+        var tracked = NewRecord(info, game);
         if (Classify(info) != WindowMode.Windowed)
         {
             Save(tracked);
@@ -347,7 +463,7 @@ public sealed class BackdropController(IWindowSystem windows, GameList games, Ti
             case ChangeResult.WindowGone:
             case ChangeResult.Failed:
                 // Nothing was changed; a later Shown event (or, for a tracked window, its next
-                // change) gets another try.
+                // change; for a toggled-off game, the next press) gets another try.
                 return;
         }
 
@@ -422,7 +538,7 @@ public sealed class BackdropController(IWindowSystem windows, GameList games, Ti
     /// </summary>
     private void MarkAgain(TrackedWindow tracked)
     {
-        if (tracked.State != TrackedState.Restyled || tracked.Backdrop is null) return;
+        if (!tracked.IsRestyledNow || tracked.Backdrop is null) return;
         if (StillLive(tracked) is null) return;
         if (windows.MarkFullscreen(tracked.Window, true) == ChangeResult.Ok && !tracked.MarkedFullscreen)
             _tracked[tracked.Window] = tracked with { MarkedFullscreen = true };
@@ -458,7 +574,9 @@ public sealed class BackdropController(IWindowSystem windows, GameList games, Ti
                 if (fights > MaxFights) return;
                 Restyle(tracked, info, fights);
                 return;
-            case TrackedState.Restyled:
+            // A put-back frame is the game's again (see IsRestyledNow): the next press or quit
+            // finishes its restore, and following it would strip and centre it with no backdrop.
+            case TrackedState.Restyled when tracked.IsRestyledNow:
                 FollowRestyled(tracked, info);
                 return;
         }
@@ -683,6 +801,25 @@ public sealed class BackdropController(IWindowSystem windows, GameList games, Ti
     {
         DropBackdrop(tracked);
         _tracked.Remove(tracked.Window);
+    }
+
+    /// <summary>
+    /// A window of <paramref name="run"/> exists, so any earlier run with its process id has ended
+    /// (two live processes never share an id): drop what was kept for it.
+    /// </summary>
+    private void ForgetEndedRuns(GameRun run)
+    {
+        _toggledOff.RemoveWhere(r => r.ProcessId == run.ProcessId && r != run);
+        _inFront.RemoveAll(r => r.ProcessId == run.ProcessId && r != run);
+    }
+
+    /// <summary>The game came to the foreground: it is now the most recent in <see cref="_inFront"/>.</summary>
+    private void NoteInFront(TrackedWindow tracked)
+    {
+        // A replaced splash is no longer the game's window.
+        if (tracked.State == TrackedState.RestorePending) return;
+        _inFront.Remove(tracked.Run);
+        _inFront.Add(tracked.Run);
     }
 
     /// <summary>Whether the tracked window is still the one behind its handle, by a fresh Describe.</summary>

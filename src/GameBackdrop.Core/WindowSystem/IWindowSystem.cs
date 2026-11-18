@@ -22,6 +22,9 @@ public interface IWindowSystem
     /// <summary>All top-level windows, visible or not, in Z order.</summary>
     IReadOnlyList<WindowHandle> TopLevelWindows();
 
+    /// <summary>The foreground window (the one the user is in), or null when no window has it.</summary>
+    WindowHandle? ForegroundWindow();
+
     /// <summary>
     /// The window as it is now, or null if it no longer exists. Its <see cref="WindowInfo.Lifetime"/>
     /// is current: the port first takes in the window destructions the OS has already reported,
