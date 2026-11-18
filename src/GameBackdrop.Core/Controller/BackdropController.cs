@@ -104,6 +104,13 @@ public sealed record TrackedWindow(
     WindowStyle Owed = default)
 {
     public GameRun Run => new(ProcessId, ProcessStarted);
+
+    /// <summary>
+    /// The window has the controller's strip and place on it now. A restyled record whose frame
+    /// is back (a restore that left only its unmark to retry) is being put back, not restyled:
+    /// nothing may strip, centre, follow or mark it again.
+    /// </summary>
+    public bool IsRestyledNow => State == TrackedState.Restyled && !FrameRestored;
 }
 
 /// <summary>
@@ -531,7 +538,7 @@ public sealed class BackdropController(IWindowSystem windows, GameList games, Ti
     /// </summary>
     private void MarkAgain(TrackedWindow tracked)
     {
-        if (tracked.State != TrackedState.Restyled || tracked.Backdrop is null) return;
+        if (!tracked.IsRestyledNow || tracked.Backdrop is null) return;
         if (StillLive(tracked) is null) return;
         if (windows.MarkFullscreen(tracked.Window, true) == ChangeResult.Ok && !tracked.MarkedFullscreen)
             _tracked[tracked.Window] = tracked with { MarkedFullscreen = true };
@@ -567,7 +574,9 @@ public sealed class BackdropController(IWindowSystem windows, GameList games, Ti
                 if (fights > MaxFights) return;
                 Restyle(tracked, info, fights);
                 return;
-            case TrackedState.Restyled:
+            // A put-back frame is the game's again (see IsRestyledNow): the next press or quit
+            // finishes its restore, and following it would strip and centre it with no backdrop.
+            case TrackedState.Restyled when tracked.IsRestyledNow:
                 FollowRestyled(tracked, info);
                 return;
         }

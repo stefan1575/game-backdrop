@@ -345,6 +345,73 @@ public sealed class ToggleTests
         AssertBackdropOff(game, OpenedAt(100, 100));
     }
 
+    // Review 3 F3: a toggle-off that puts the frame back but can't unmark leaves the record
+    // restyled with its frame restored. Nothing may follow that window as a restyled game.
+    [Fact]
+    public void A_toggle_off_whose_unmark_fails_leaves_the_game_alone_when_it_moves()
+    {
+        var controller = StartController();
+        var game = OpenGame();
+        _desktop.FailNextMarks(game);
+        controller.ToggleBackdrop();
+
+        _desktop.Move(game, Rect.FromPosition(200, 150, OpenedAt(100, 100).Outer.Size));
+
+        Assert.True(game.HasBorder);
+        Assert.Equal(Rect.FromPosition(200, 150, OpenedAt(100, 100).Outer.Size), game.Outer);
+        Assert.Empty(_desktop.VisibleBackdropsOn(Primary));
+    }
+
+    [Fact]
+    public void A_toggle_off_whose_unmark_fails_leaves_the_game_alone_on_the_restores_own_event()
+    {
+        var controller = StartController();
+        var game = OpenGame();
+        _desktop.FailNextMarks(game);
+        controller.ToggleBackdrop();
+
+        _desktop.Raise(WindowEventKind.LocationChanged, game);
+
+        Assert.True(game.HasBorder);
+        Assert.Equal(OpenedAt(100, 100).Outer, game.Outer);
+        Assert.Empty(_desktop.VisibleBackdropsOn(Primary));
+    }
+
+    [Fact]
+    public void A_toggle_off_whose_unmark_fails_leaves_the_game_alone_when_it_resizes_or_goes_fullscreen()
+    {
+        var controller = StartController();
+        var game = OpenGame();
+        _desktop.FailNextMarks(game);
+        controller.ToggleBackdrop();
+
+        _desktop.ResizeClient(game, new Size(1024, 768));
+        Assert.True(game.HasBorder);
+        Assert.Empty(_desktop.VisibleBackdropsOn(Primary));
+
+        _desktop.SetOwnFrame(game, FakeWindowSystem.Popup, Primary.Bounds);
+        Assert.Equal(FakeWindowSystem.Popup, game.Style);
+        Assert.Equal(Primary.Bounds, game.Outer);
+        Assert.Empty(_desktop.VisibleBackdropsOn(Primary));
+    }
+
+    [Fact]
+    public void A_toggle_off_whose_unmark_fails_is_finished_by_the_next_press_and_the_one_after_turns_it_on()
+    {
+        var controller = StartController();
+        var game = OpenGame();
+        _desktop.FailNextMarks(game);
+        controller.ToggleBackdrop();
+        Assert.True(game.IsMarkedFullscreen);
+        _desktop.Move(game, Rect.FromPosition(200, 150, OpenedAt(100, 100).Outer.Size));
+
+        controller.ToggleBackdrop();
+        AssertBackdropOff(game, OpenedAt(200, 150));
+
+        controller.ToggleBackdrop();
+        AssertBackdropOn(game);
+    }
+
     [Fact]
     public void A_game_replaced_under_its_handle_before_the_toggle_leaves_the_newcomer_alone()
     {
