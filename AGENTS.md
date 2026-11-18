@@ -1,19 +1,20 @@
 # Game backdrop
 
-A Windows tray app: when a game on Stefan's list runs **windowed**, it strips the game's title
+A Windows tray app: when a game on the user's list runs **windowed**, it strips the game's title
 bar and border, centres it at its own size, and blacks out the rest of that monitor, taskbar
 included, for full immersion. A game that fills its screen (fullscreen or borderless) is left to
 its own native mode. The spec is the GitHub issue labelled `spec`; its tickets are sub-issues.
 
-Windows only (Stefan, 2026-11-15): Linux was considered and dropped, because Wayland doesn't let
+Windows only (2026-11-15): Linux was considered and dropped, because Wayland doesn't let
 an outside app move another app's window, so a shared backend wouldn't come for free.
 
-**On GitHub as the private `stefan1575/game-backdrop`.** Commit after every completed step, with
-a message that says what changed and why. Every PR is reviewed by Sol (`~/.claude/docs/pr-review.md`).
+Commit after every completed step, with a message that says what changed and why.
 
 ## Build and test
 
 C# on .NET 10 (WinForms), SDK from scoop (`dotnet-sdk`).
+If `dotnet` reports no SDKs, put Scoop's SDK first on PATH for this shell:
+`$env:PATH = "$env:USERPROFILE\scoop\apps\dotnet-sdk\current;$env:PATH"`.
 
 ```
 dotnet build
@@ -26,6 +27,11 @@ F borderless fullscreen, R next size; or `--mode fullscreen`, `--size 1280x720`)
 in a settings file and start the app with `--settings <path>` to leave the real
 `%APPDATA%\GameBackdrop\settings.json` alone; such a run also keeps its Start at logon shortcut in
 a `Startup` folder beside that settings file, never in the real Startup folder.
+
+Screenshots (a visible change needs a before and after): use the evidence harness on the
+`evidence` branch (`harness/README.md`). Add a scenario for the PR, run it on `main` for `before-`
+and on the PR for `after-`. Never capture the whole desktop: it shows other programs.
+A state a script can't reach (a UAC prompt) is `Screenshot owed: <why>`.
 
 Layout: `src/GameBackdrop.Core` (no Win32: settings, game list, classifier, placement, and the
 `BackdropController` over the `IWindowSystem` port, and `StartAtLogon` over the
@@ -46,7 +52,7 @@ built first in the same configuration).
 - The decisions (fullscreen or windowed, where to centre, which monitor) live in a core with no
   Win32 calls, so they're unit-tested; the Win32 layer stays thin.
 
-## Agent skills
+## Agent docs
 
 ### Issue tracker
 
@@ -59,5 +65,4 @@ The five default labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready
 
 ### Domain docs
 
-Single-context: `GLOSSARY.md` and `docs/adr/` at the root, created when needed. See
-`docs/agents/domain.md`.
+Before exploring code, read `docs/agents/domain.md` for the repo's optional glossary and ADRs.
