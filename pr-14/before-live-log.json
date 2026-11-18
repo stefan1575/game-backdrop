@@ -8,6 +8,36 @@
     "client": "(0,0) 2560x1440"
   },
   {
+    "game": {
+      "style": "0x94000000",
+      "ex": "0x00000000",
+      "outer": "(0,0) 2560x1440",
+      "client": "(0,0) 2560x1440",
+      "visible": true,
+      "minimised": false
+    },
+    "backdrops": [
+      {
+        "rect": "(0,0) 2560x1440",
+        "visible": true,
+        "ex": "0x08000080",
+        "noActivate": true,
+        "toolWindow": true,
+        "topmost": false
+      }
+    ],
+    "firstVisibleBelowGame": "backdrop",
+    "firstVisibleBelowGameInfo": null,
+    "backdropDirectlyBehindGame": true,
+    "foreground": "game",
+    "taskbar": "below the backdrop",
+    "blackShareOutsideGame": "n/a (empty area)",
+    "name": "1-game-goes-fullscreen-monitor",
+    "scene": "1. Restyled game switches itself to borderless fullscreen (F): black backdrop covers the monitor",
+    "activatedByHarness": "no (already foreground)",
+    "picture": "1-game-goes-fullscreen-monitor.png: the backdrop\u0027s and the game\u0027s own pixels (PrintWindow) at their real rects and Z order"
+  },
+  {
     "name": "2-game-goes-windowed-again",
     "scene": "2. Then back to windowed (W): black backdrop covers the monitor",
     "style": "0x14CF0000",
@@ -16,12 +46,72 @@
     "client": "(108,131) 800x600"
   },
   {
+    "game": {
+      "style": "0x14CF0000",
+      "ex": "0x00000100",
+      "outer": "(100,100) 816x639",
+      "client": "(108,131) 800x600",
+      "visible": true,
+      "minimised": false
+    },
+    "backdrops": [
+      {
+        "rect": "(0,0) 2560x1440",
+        "visible": true,
+        "ex": "0x08000080",
+        "noActivate": true,
+        "toolWindow": true,
+        "topmost": false
+      }
+    ],
+    "firstVisibleBelowGame": "backdrop",
+    "firstVisibleBelowGameInfo": null,
+    "backdropDirectlyBehindGame": true,
+    "foreground": "game",
+    "taskbar": "below the backdrop",
+    "blackShareOutsideGame": "100.00% of 3164976 px",
+    "name": "2-game-goes-windowed-again-monitor",
+    "scene": "2. Then back to windowed (W): black backdrop covers the monitor",
+    "activatedByHarness": "no (already foreground)",
+    "picture": "2-game-goes-windowed-again-monitor.png: the backdrop\u0027s and the game\u0027s own pixels (PrintWindow) at their real rects and Z order"
+  },
+  {
     "name": "3-game-changes-resolution",
     "scene": "3. Then a resolution change to 1280x720 (R): black backdrop covers the monitor",
     "style": "0x14CF0000",
     "ex": "0x00000100",
     "outer": "(100,100) 1296x759",
     "client": "(108,131) 1280x720"
+  },
+  {
+    "game": {
+      "style": "0x14CF0000",
+      "ex": "0x00000100",
+      "outer": "(100,100) 1296x759",
+      "client": "(108,131) 1280x720",
+      "visible": true,
+      "minimised": false
+    },
+    "backdrops": [
+      {
+        "rect": "(0,0) 2560x1440",
+        "visible": true,
+        "ex": "0x08000080",
+        "noActivate": true,
+        "toolWindow": true,
+        "topmost": false
+      }
+    ],
+    "firstVisibleBelowGame": "backdrop",
+    "firstVisibleBelowGameInfo": null,
+    "backdropDirectlyBehindGame": true,
+    "foreground": "game",
+    "taskbar": "below the backdrop",
+    "blackShareOutsideGame": "100.00% of 2702736 px",
+    "name": "3-game-changes-resolution-monitor",
+    "scene": "3. Then a resolution change to 1280x720 (R): black backdrop covers the monitor",
+    "activatedByHarness": "no (already foreground)",
+    "picture": "3-game-changes-resolution-monitor.png: the backdrop\u0027s and the game\u0027s own pixels (PrintWindow) at their real rects and Z order"
   },
   {
     "name": "4-after-quit",
@@ -48,12 +138,143 @@
     "client": "(0,0) 2560x1440"
   },
   {
+    "game": {
+      "style": "0x94000000",
+      "ex": "0x00000008",
+      "outer": "(0,0) 2560x1440",
+      "client": "(0,0) 2560x1440",
+      "visible": true,
+      "minimised": false
+    },
+    "backdrops": [
+      {
+        "rect": "(0,0) 2560x1440",
+        "visible": true,
+        "ex": "0x08000080",
+        "noActivate": true,
+        "toolWindow": true,
+        "topmost": false
+      }
+    ],
+    "firstVisibleBelowGame": "other window (class Avalonia-f8316e11-3aba-4021-9eb3-8dbb3772eb25)",
+    "firstVisibleBelowGameInfo": {
+      "cls": "Avalonia-f8316e11-3aba-4021-9eb3-8dbb3772eb25",
+      "process": "ShareX",
+      "rect": "(0,0) 2560x1440",
+      "ex": "0x00200008",
+      "topmost": true,
+      "layered": false,
+      "transparent": false,
+      "belowGame": true
+    },
+    "backdropDirectlyBehindGame": false,
+    "foreground": "game",
+    "taskbar": "below the backdrop",
+    "blackShareOutsideGame": "n/a (empty area)",
+    "name": "6-maximised-game-fills-monitor-monitor",
+    "scene": "6. App stripped it (WS_MAXIMIZE off); it went topmost and filled the monitor itself: black backdrop covers the monitor",
+    "activatedByHarness": "no (already foreground)",
+    "picture": "6-maximised-game-fills-monitor-monitor.png: the backdrop\u0027s and the game\u0027s own pixels (PrintWindow) at their real rects and Z order"
+  },
+  {
     "name": "7-maximised-after-quit",
     "scene": "7. App quit from its tray menu",
     "style": "0x95000000",
     "ex": "0x00000008",
     "outer": "(0,0) 2560x1392",
     "client": "(0,0) 2560x1392"
+  },
+  {
+    "name": "10-resize-border-before-app",
+    "scene": "10. Frameless game with a resize border, app not running",
+    "style": "0x94040000",
+    "ex": "0x00000100",
+    "outer": "(100,100) 816x616",
+    "client": "(107,107) 802x602"
+  },
+  {
+    "name": "11-resize-border-stripped",
+    "scene": "11. App started: resize border stripped, centred: black backdrop covers the monitor",
+    "style": "0x94000000",
+    "ex": "0x00000000",
+    "outer": "(879,419) 802x602",
+    "client": "(879,419) 802x602"
+  },
+  {
+    "game": {
+      "style": "0x94000000",
+      "ex": "0x00000000",
+      "outer": "(879,419) 802x602",
+      "client": "(879,419) 802x602",
+      "visible": true,
+      "minimised": false
+    },
+    "backdrops": [
+      {
+        "rect": "(0,0) 2560x1440",
+        "visible": true,
+        "ex": "0x08000080",
+        "noActivate": true,
+        "toolWindow": true,
+        "topmost": false
+      }
+    ],
+    "firstVisibleBelowGame": "backdrop",
+    "firstVisibleBelowGameInfo": null,
+    "backdropDirectlyBehindGame": true,
+    "foreground": "other window (class Avalonia-f8316e11-3aba-4021-9eb3-8dbb3772eb25)",
+    "taskbar": "below the backdrop",
+    "blackShareOutsideGame": "100.00% of 3203596 px",
+    "name": "11-resize-border-stripped-monitor",
+    "scene": "11. App started: resize border stripped, centred: black backdrop covers the monitor",
+    "activatedByHarness": "FAILED to activate",
+    "picture": "11-resize-border-stripped-monitor.png: the backdrop\u0027s and the game\u0027s own pixels (PrintWindow) at their real rects and Z order"
+  },
+  {
+    "name": "12-resize-border-game-fills-monitor",
+    "scene": "12. The game filled its monitor itself, still stripped (WS_THICKFRAME 0x00040000 back?): black backdrop covers the monitor",
+    "style": "0x94000000",
+    "ex": "0x00000000",
+    "outer": "(0,0) 2560x1440",
+    "client": "(0,0) 2560x1440"
+  },
+  {
+    "game": {
+      "style": "0x94000000",
+      "ex": "0x00000000",
+      "outer": "(0,0) 2560x1440",
+      "client": "(0,0) 2560x1440",
+      "visible": true,
+      "minimised": false
+    },
+    "backdrops": [
+      {
+        "rect": "(0,0) 2560x1440",
+        "visible": true,
+        "ex": "0x08000080",
+        "noActivate": true,
+        "toolWindow": true,
+        "topmost": false
+      }
+    ],
+    "firstVisibleBelowGame": "backdrop",
+    "firstVisibleBelowGameInfo": null,
+    "backdropDirectlyBehindGame": true,
+    "foreground": "other window (class Avalonia-f8316e11-3aba-4021-9eb3-8dbb3772eb25)",
+    "taskbar": "below the backdrop",
+    "blackShareOutsideGame": "n/a (empty area)",
+    "name": "12-resize-border-game-fills-monitor-monitor",
+    "scene": "12. The game filled its monitor itself, still stripped (WS_THICKFRAME 0x00040000 back?): black backdrop covers the monitor",
+    "activatedByHarness": "FAILED to activate",
+    "picture": "12-resize-border-game-fills-monitor-monitor.png: the backdrop\u0027s and the game\u0027s own pixels (PrintWindow) at their real rects and Z order"
+  },
+  {
+    "name": "13-resize-border-after-quit",
+    "scene": "13. App quit from its tray menu",
+    "style": "0x94040000",
+    "ex": "0x00000100",
+    "outer": "(100,100) 816x616",
+    "client": "(107,107) 802x602"
   },
   {
     "name": "8-disabled-game-after-quit",
