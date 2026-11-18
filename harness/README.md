@@ -33,6 +33,12 @@ Scenarios live in `Program.cs` (`main`: windowed, menus, fullscreen, Quit; `wrap
   of other programs' windows are painted over before the picture is saved. Buttons that open a
   modal dialog are clicked with a posted `BM_CLICK`, not UI Automation's Invoke, which would
   leave later UIA calls into the app timing out.
+- `admin` (PR #20, `pr-20/`): a game running as administrator. `elevated-game.ps1` (copied
+  next to `Evidence.exe`) starts TestWindow elevated and closes it, and the elevated app copy,
+  on signal files, since the unelevated harness can't. A person answers the UAC prompts (accept
+  for the game, decline from the notice, accept from the menu). Logs the untouched game, the
+  notice's text, the tray menu, the takeover and the elevated copy's tray icon name. The whole
+  monitor is captured only with the game in front and no other window over that monitor.
 - `fgprobe2` (PR #12 diagnosis, defect A): a harness window is the foreground while the game is
   restyled, then the game is activated; three rounds. Log only.
 

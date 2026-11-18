@@ -1,0 +1,58 @@
+[
+  {
+    "step": "app started",
+    "pid": 25476
+  },
+  {
+    "step": "elevated game, normal app",
+    "style": "0x14CF0000",
+    "outer": "(100,100) 816x639",
+    "client": "(108,131) 800x600",
+    "backdrops": 0,
+    "above": [
+      "Shell_TrayWnd"
+    ]
+  },
+  {
+    "step": "notice",
+    "found": false
+  },
+  {
+    "step": "tray menu",
+    "items": [
+      "Open list",
+      "Start at logon",
+      "Restart as administrator",
+      "Quit"
+    ]
+  },
+  {
+    "step": "menu restart",
+    "uacShown": true,
+    "uacGone": true
+  },
+  {
+    "step": "elevated copy took over",
+    "normalExited": true,
+    "elevatedPid": 47480,
+    "style": "0x14020000",
+    "outer": "(880,420) 800x600",
+    "client": "(880,420) 800x600",
+    "backdrops": [
+      "(0,0) 2560x1440"
+    ]
+  },
+  {
+    "step": "monitor black outside the game",
+    "black": "70.11% of 3206400 px"
+  },
+  {
+    "step": "tray icon names",
+    "names": []
+  },
+  {
+    "step": "tooltip",
+    "found": false,
+    "note": "icon not on the taskbar (likely in the hidden-icons overflow)"
+  }
+]

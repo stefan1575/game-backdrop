@@ -718,6 +718,129 @@ try
         Thread.Sleep(500);
         Quit(app);
     }
+    else if (scenario == "admin")
+    {
+        // PR #20: a game running as administrator. Three UAC prompts, answered by a person:
+        // 1 accept (TestWindow elevated), 2 decline (from the notice), 3 accept (from the menu).
+        var signals = Path.Combine(outDir, "signals");
+        if (Directory.Exists(signals)) Directory.Delete(signals, true);
+        Directory.CreateDirectory(signals);
+        var helper = Path.Combine(AppContext.BaseDirectory, "elevated-game.ps1");
+
+        var app = Launch(appExe, $"--settings \"{settingsPath}\"");
+        Thread.Sleep(2000);
+        log.Add(new { step = "app started", pid = app.Id });
+
+        Console.WriteLine(">>> UAC 1 of 3: ACCEPT (starts the test window as administrator)");
+        Process.Start(new ProcessStartInfo("powershell.exe",
+            $"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"{helper}\" \"{testExe}\" \"{appExe}\" \"{signals}\"")
+            { UseShellExecute = true, Verb = "runas", WindowStyle = ProcessWindowStyle.Hidden });
+        nint game = 0;
+        for (var i = 0; i < 600 && game == 0; i++) { game = W.WindowsOfClass("GameBackdropTestWindow").FirstOrDefault(W.IsVisible); Thread.Sleep(200); }
+        if (game == 0) throw new Exception("elevated test window never appeared");
+        Thread.Sleep(3000);
+        var d1 = W.Describe(game);
+        log.Add(new { step = "elevated game, normal app", style = $"0x{d1.Style:X8}", outer = d1.Outer.ToString(), client = d1.Client.ToString(),
+            backdrops = W.Backdrops(app.Id).Count(W.IsVisible), above = W.VisibleAbove(game).Select(W.ClassOf).ToList() });
+        Console.WriteLine($"game: style 0x{d1.Style:X8} outer {d1.Outer} (untouched: has WS_CAPTION {(d1.Style & 0x00C00000) == 0x00C00000})");
+        U.SaveCaptioned(Path.Combine(outDir, "after-1-game-untouched.png"), A.VisibleFrameFromScreen(game),
+            $"Elevated test window, normal app running: left untouched (style 0x{d1.Style:X8}, outer {d1.Outer}). The window's own rect, from the screen.");
+
+        var toast = A.WaitToast(15000);
+        if (toast is null) { Console.WriteLine("no notice appeared"); log.Add(new { step = "notice", found = false }); }
+        else
+        {
+            var texts = A.Texts(toast);
+            log.Add(new { step = "notice", found = true, texts });
+            Console.WriteLine("notice: " + string.Join(" | ", texts));
+            U.SaveCaptioned(Path.Combine(outDir, "after-2-notice.png"), A.FromScreen(toast), "The notice, once for this run of the game. The notice's own rect, from the screen.");
+        }
+
+        if (toast is not null)
+        {
+            Console.WriteLine(">>> UAC 2 of 3: DECLINE (clicking the notice now)");
+            var r = toast.Current.BoundingRectangle;
+            var cursor = W.CursorPos();
+            W.Click((int)(r.Left + r.Width / 2), (int)(r.Top + r.Height * 0.4));
+            W.SetCursor(cursor);
+            var answered = A.WaitConsent(180000);
+            log.Add(new { step = "notice clicked", uacShown = answered.shown, uacGone = answered.gone });
+            Thread.Sleep(3000);
+            var others = Process.GetProcessesByName("GameBackdrop").Where(p => p.Id != app.Id).Select(p => p.Id).ToList();
+            var d2 = W.Describe(game);
+            log.Add(new { step = "after decline", appRunning = !app.HasExited, otherCopies = others, style = $"0x{d2.Style:X8}", outer = d2.Outer.ToString() });
+            Console.WriteLine($"after decline: normal copy running {!app.HasExited}, other copies {others.Count}, game style 0x{d2.Style:X8}");
+        }
+
+        var menu = U.OpenTrayMenu(app);
+        var items = U.MenuItems(menu);
+        log.Add(new { step = "tray menu", items });
+        Console.WriteLine("menu: " + string.Join(", ", items));
+        U.SaveCaptioned(Path.Combine(outDir, "after-3-menu.png"), U.FromScreen(menu), "The tray menu after the notice: \"Restart as administrator\". The menu's own rect, from the screen.");
+        var restart = U.Find(menu, "Restart as administrator", ControlType.MenuItem) ?? throw new Exception("no Restart as administrator item");
+        Console.WriteLine(">>> UAC 3 of 3: ACCEPT (Restart as administrator from the menu)");
+        U.InvokeAsync(restart);
+        var accepted = A.WaitConsent(180000);
+        log.Add(new { step = "menu restart", uacShown = accepted.shown, uacGone = accepted.gone });
+        Process? elevated = null;
+        for (var i = 0; i < 150 && elevated is null; i++)
+        {
+            elevated = Process.GetProcessesByName("GameBackdrop").FirstOrDefault(p => p.Id != app.Id);
+            Thread.Sleep(200);
+        }
+        var normalExited = app.WaitForExit(20000);
+        if (elevated is null) throw new Exception("no elevated copy started");
+        WaitChanged(game, d1.Style);
+        WaitBackdrop(elevated.Id);
+        A.WaitNoToast(15000);
+        Thread.Sleep(800);
+        var d3 = W.Describe(game);
+        var mon = Screen.FromHandle(game).Bounds;
+        log.Add(new { step = "elevated copy took over", normalExited, elevatedPid = elevated.Id, style = $"0x{d3.Style:X8}", outer = d3.Outer.ToString(), client = d3.Client.ToString(),
+            backdrops = W.Backdrops(elevated.Id).Where(W.IsVisible).Select(h => W.Describe(h).Outer.ToString()).ToList() });
+        Console.WriteLine($"took over: normal exited {normalExited}, game style 0x{d3.Style:X8} outer {d3.Outer} client {d3.Client}");
+        // The whole monitor only with the game in front and nothing else over that monitor:
+        // otherwise the picture would show other programs (first run: the active window, above
+        // the backdrop, because the elevated game wasn't in front).
+        var activated = W.EnsureForeground(game);
+        Thread.Sleep(800);
+        var over = W.VisibleAbove(game).Where(h => W.Intersects(h, mon)).Select(W.ClassOf).ToList();
+        log.Add(new { step = "before the monitor picture", activated, windowsOverTheMonitor = over });
+        if (over.Count > 0) Console.WriteLine("monitor picture skipped: other windows over the monitor: " + string.Join(", ", over));
+        else using (var bmp = new Bitmap(mon.Width, mon.Height))
+        {
+            using (var g = Graphics.FromImage(bmp)) g.CopyFromScreen(mon.X, mon.Y, 0, 0, mon.Size);
+            var black = W.BlackShare(bmp, (x, y) => !new Rectangle(d3.Outer.X - mon.X, d3.Outer.Y - mon.Y, d3.Outer.Width, d3.Outer.Height).Contains(x, y));
+            log.Add(new { step = "monitor black outside the game", black });
+            U.SaveCaptioned(Path.Combine(outDir, "after-4-elevated-restyled.png"), (Bitmap)bmp.Clone(),
+                $"Elevated copy: game borderless and centred (outer {d3.Outer}), the rest of the monitor black ({black}). Whole monitor from the screen, under the backdrop.");
+        }
+        var names = A.TrayNames();
+        log.Add(new { step = "tray icon names", names });
+        Console.WriteLine("tray icon names: " + string.Join(" | ", names));
+
+        // Close the game (elevated helper), so the taskbar shows; then hover the icon for its tooltip.
+        File.WriteAllText(Path.Combine(signals, "close-game"), "");
+        for (var i = 0; i < 100 && !File.Exists(Path.Combine(signals, "game-closed")); i++) Thread.Sleep(100);
+        Thread.Sleep(1500);
+        var icon = A.TrayIcon("Game Backdrop");
+        if (icon is null) log.Add(new { step = "tooltip", found = false, note = "icon not on the taskbar (likely in the hidden-icons overflow)" });
+        else
+        {
+            var ir = icon.Current.BoundingRectangle;
+            var cursor = W.CursorPos();
+            W.SetCursor($"({(int)(ir.Left + ir.Width / 2)},{(int)(ir.Top + ir.Height / 2)})");
+            Thread.Sleep(2000);
+            var tip = W.WindowsOfClass("tooltips_class32").FirstOrDefault(h => W.IsVisible(h) && W.TitleOf(h).StartsWith("Game Backdrop"));
+            log.Add(new { step = "tooltip", found = true, iconName = icon.Current.Name, tooltipWindow = tip != 0 ? W.TitleOf(tip) : null });
+            if (tip != 0) U.SaveCaptioned(Path.Combine(outDir, "after-5-tooltip.png"), U.FromScreen(tip), "The tray icon's tooltip in the elevated copy. The tooltip's own rect, from the screen.");
+            W.SetCursor(cursor);
+            Console.WriteLine($"icon name \"{icon.Current.Name}\", tooltip window {(tip != 0 ? W.TitleOf(tip) : "not found")}");
+        }
+        File.WriteAllText(Path.Combine(signals, "stop"), "");
+        for (var i = 0; i < 100 && !File.Exists(Path.Combine(signals, "stopped")); i++) Thread.Sleep(100);
+        Console.WriteLine("elevated helper stopped the test window and the elevated copy");
+    }
     else if (scenario == "wrap")
     {
         var wrap = WaitWindow(Launch(testExe, "--size 400x600 --menu-items 14"));
@@ -915,6 +1038,77 @@ static class W
         g.ReleaseHdc(dc);
         return bmp;
     }
+}
+
+// The "admin" scenario (PR #20): notices, the UAC prompt, the tray icon, through UI Automation.
+static class A
+{
+    static List<AutomationElement> Toasts() =>
+        AutomationElement.RootElement.FindAll(TreeScope.Children, new PropertyCondition(AutomationElement.NameProperty, "New notification"))
+        .Cast<AutomationElement>().Where(e => !e.Current.BoundingRectangle.IsEmpty && e.Current.BoundingRectangle.Width > 0).ToList();
+
+    public static AutomationElement? WaitToast(int ms)
+    {
+        for (var t = 0; t < ms; t += 200) { var x = Toasts().FirstOrDefault(); if (x is not null) { Thread.Sleep(1200); return x; } Thread.Sleep(200); }
+        return null;
+    }
+
+    public static void WaitNoToast(int ms) { for (var t = 0; t < ms && Toasts().Count > 0; t += 200) Thread.Sleep(200); }
+
+    public static List<string> Texts(AutomationElement e) =>
+        e.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Text))
+        .Cast<AutomationElement>().Select(x => x.Current.Name).Where(s => !string.IsNullOrWhiteSpace(s)).ToList();
+
+    public static Bitmap FromScreen(AutomationElement e)
+    {
+        var r = e.Current.BoundingRectangle;
+        var bmp = new Bitmap((int)r.Width, (int)r.Height);
+        using var g = Graphics.FromImage(bmp);
+        g.CopyFromScreen((int)r.Left, (int)r.Top, 0, 0, bmp.Size);
+        return bmp;
+    }
+
+    [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(nint h, int attr, out RECT r, int size);
+    [StructLayout(LayoutKind.Sequential)] struct RECT { public int L, T, R, B; }
+
+    // A window's visible frame (DWMWA_EXTENDED_FRAME_BOUNDS), from the screen: GetWindowRect
+    // includes the invisible resize borders, which show whatever is behind.
+    public static Bitmap VisibleFrameFromScreen(nint h)
+    {
+        DwmGetWindowAttribute(h, 9, out var r, Marshal.SizeOf<RECT>());
+        var bmp = new Bitmap(r.R - r.L, r.B - r.T);
+        using var g = Graphics.FromImage(bmp);
+        g.CopyFromScreen(r.L, r.T, 0, 0, bmp.Size);
+        return bmp;
+    }
+
+    // The UAC prompt runs as consent.exe: wait for it to show, then to go (answered).
+    public static (bool shown, bool gone) WaitConsent(int ms)
+    {
+        var shown = false;
+        for (var t = 0; t < ms; t += 200)
+        {
+            var up = Process.GetProcessesByName("consent").Length > 0;
+            if (up) shown = true;
+            else if (shown) { Console.WriteLine("UAC prompt answered"); return (true, true); }
+            else if (t > 20000) return (false, false); // never showed
+            Thread.Sleep(200);
+        }
+        return (shown, false);
+    }
+
+    static IEnumerable<AutomationElement> TrayButtons()
+    {
+        var tray = W.FindTray();
+        if (tray == 0) return [];
+        return AutomationElement.FromHandle(tray).FindAll(TreeScope.Descendants,
+            new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button)).Cast<AutomationElement>();
+    }
+
+    public static List<string> TrayNames() => TrayButtons().Select(b => b.Current.Name).Where(n => n.StartsWith("Game Backdrop")).ToList();
+
+    public static AutomationElement? TrayIcon(string prefix) =>
+        TrayButtons().FirstOrDefault(b => b.Current.Name.StartsWith(prefix) && !b.Current.BoundingRectangle.IsEmpty);
 }
 
 // UI Automation and pictures for the "list" scenario (PR #18).
