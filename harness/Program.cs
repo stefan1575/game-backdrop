@@ -287,7 +287,7 @@ try
     }
     else if (scenario == "round3")
     {
-        // Sol's round-3 cases on the real app: a game that changes its own frame after the
+        // Review 3's cases on the real app: a game that changes its own frame after the
         // restyle (S1), and a game that is minimised when the app quits (S6).
         var self = WaitWindow(Launch(testExe, "--size 800x600"));
         var mini = WaitWindow(Launch(testExe, "--size 640x480"));
