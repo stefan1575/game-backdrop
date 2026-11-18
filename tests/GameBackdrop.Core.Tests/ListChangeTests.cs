@@ -250,6 +250,44 @@ public sealed class ListChangeTests
         AssertPutBack(game, DotaOriginal);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_game_that_cannot_be_put_back_on_two_list_changes_still_gets_its_original_frame_on_quit(bool removed)
+    {
+        StartController(Entry(Dota, "Dota 2"), Entry(Novel, "Novel"));
+        var game = OpenDota();
+        _desktop.FailNextChanges(game, ChangeResult.Failed);
+        GameEntry[] withoutDota = removed ? [Entry(Novel, "Novel")] : [Entry(Dota, "Dota 2", enabled: false), Entry(Novel, "Novel")];
+        ListChangesTo(withoutDota);
+
+        // The retry on the next change fails too: the frame is still owed.
+        _desktop.FailNextChanges(game, ChangeResult.Failed);
+        ListChangesTo([.. withoutDota, Entry(@"C:\Games\other.exe", "Other")]);
+
+        Assert.Empty(_controller.Stop());
+        AssertPutBack(game, DotaOriginal);
+    }
+
+    [Fact]
+    public void A_replaced_splash_that_cannot_be_put_back_on_a_list_change_either_still_gets_its_original_frame_on_quit()
+    {
+        StartController(Entry(Novel, "Novel"));
+        var process = _desktop.StartProcess(Novel);
+        var splashOriginal = new WindowFrame(FakeWindowSystem.Captioned, new Rect(100, 100, 500, 400));
+        var splash = _desktop.Open(process, splashOriginal.Style, splashOriginal.Outer);
+        _desktop.FailNextChanges(splash, ChangeResult.Failed);
+        _desktop.OpenWindowed(process, new Size(1280, 720));
+        Assert.False(splash.HasBorder);
+
+        _desktop.FailNextChanges(splash, ChangeResult.Failed);
+        ListChangesTo();
+
+        Assert.False(splash.HasBorder);
+        Assert.Empty(_controller.Stop());
+        AssertPutBack(splash, splashOriginal);
+    }
+
     [Fact]
     public void Switching_off_a_fullscreen_game_changes_nothing_on_it()
     {

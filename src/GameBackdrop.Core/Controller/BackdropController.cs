@@ -264,8 +264,20 @@ public sealed class BackdropController(IWindowSystem windows, GameList games, Ti
     {
         var left = TryRestore(DropBackdrop(tracked));
         if (left is null) Forget(tracked);
-        else Save(left with { State = TrackedState.RestorePending, FrameRestored = left.FrameRestored || left.State != TrackedState.Restyled });
+        else Save(AsRestorePending(left));
     }
+
+    /// <summary>
+    /// A window that couldn't be put back yet, kept for a later try. Whether its frame is still
+    /// owed comes from the state it had when it first left: a restyled one is owed its original
+    /// frame until a try puts it back; a released one (fullscreen by its own choice) never was. A
+    /// record already pending keeps what it owes, since its state no longer says which it was.
+    /// </summary>
+    private static TrackedWindow AsRestorePending(TrackedWindow left) => left with
+    {
+        State = TrackedState.RestorePending,
+        FrameRestored = left.FrameRestored || left.State is not (TrackedState.Restyled or TrackedState.RestorePending),
+    };
 
     /// <summary>
     /// The hotkey: turn the backdrop off for the game in front (its window put back as it was, the
@@ -426,7 +438,7 @@ public sealed class BackdropController(IWindowSystem windows, GameList games, Ti
             var left = TryRestore(current);
             if (left is null) _tracked.Remove(current.Window);
             // A retry puts back what this try owed: a released splash keeps the frame it set itself.
-            else _tracked[current.Window] = left with { State = TrackedState.RestorePending, FrameRestored = left.FrameRestored || left.State != TrackedState.Restyled };
+            else _tracked[current.Window] = AsRestorePending(left);
             // Putting the splash back took port calls: meanwhile the candidate can have changed,
             // or closed and its handle gone to another window. Decide on it as it is now.
             if (DescribeIfStill(info.Handle, info.Lifetime) is not { } now || !IsCandidate(now)) return;
