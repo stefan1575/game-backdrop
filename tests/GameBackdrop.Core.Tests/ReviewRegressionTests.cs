@@ -8,8 +8,9 @@ namespace GameBackdrop.Core.Tests;
 
 /// <summary>
 /// Whatever the app changed on a game is put back on quit, however the game changed its own style
-/// meanwhile and whichever restyle or put-back Windows refused along the way (Sol's review 2 of
-/// PR #14: F4, F5, F6, and the other ways into the same class).
+/// meanwhile and whichever restyle or put-back Windows refused along the way (Sol's reviews 2 and 3
+/// of PR #14: F4 to F8, and the other ways into the same class). Only what the app changed goes
+/// back: bits the game set itself meanwhile (WS_EX_TOPMOST, WS_DISABLED) stay.
 /// </summary>
 public sealed class ReviewRegressionTests
 {
@@ -139,7 +140,8 @@ public sealed class ReviewRegressionTests
         Assert.Equal(TrackedState.Restyled, Assert.Single(controller.TrackedWindows).State);
         AssertBackdropped(game);
         Assert.Empty(controller.Stop());
-        AssertFrame(game, GameOriginal);
+        // Its title bar and place come back; the bit it set itself stays.
+        AssertFrame(game, GameOriginal with { Style = Plus(FakeWindowSystem.Captioned, bits, exBits) });
     }
 
     [Fact]
@@ -155,7 +157,7 @@ public sealed class ReviewRegressionTests
         Assert.Equal(TrackedState.Restyled, Assert.Single(controller.TrackedWindows).State);
         AssertBackdropped(game);
         Assert.Empty(controller.Stop());
-        AssertFrame(game, GameOriginal);
+        AssertFrame(game, GameOriginal with { Style = Plus(FakeWindowSystem.Captioned, exBits: WS_EX_TOPMOST) });
     }
 
     [Fact]
@@ -205,7 +207,7 @@ public sealed class ReviewRegressionTests
 
         Assert.Equal(TrackedState.Restyled, Assert.Single(controller.TrackedWindows).State);
         Assert.Empty(controller.Stop());
-        AssertFrame(game, new WindowFrame(ThickPopup, Rect.FromPosition(100, 100, new Size(816, 608))));
+        AssertFrame(game, new WindowFrame(Plus(ThickPopup, exBits: WS_EX_TOPMOST), Rect.FromPosition(100, 100, new Size(816, 608))));
     }
 
     [Fact]
@@ -224,6 +226,97 @@ public sealed class ReviewRegressionTests
         Assert.Empty(controller.Stop());
         Assert.Equal(changes, _desktop.FrameChanges.Count);
         AssertFrame(game, new WindowFrame(ThickPopup, ownFullscreen));
+    }
+
+    // --- Sol's review 3 (F7, F8): what the app owes is what it took off, nothing older or narrower ---
+
+    [Fact]
+    public void A_game_that_picks_a_frameless_window_after_its_resize_border_was_put_back_does_not_get_that_border_again()
+    {
+        // F7: the border put back on the first release is the game's again; the frameless window
+        // it then picks is its own choice, so the second release owes nothing.
+        var controller = StartController();
+        var game = OpenThickPopup();
+        var stripped = game.Style;
+        _desktop.SetOwnFrame(game, stripped, Primary.Bounds);
+        Assert.Equal(ThickPopup, game.Style);
+        _time.Advance(TimeSpan.FromSeconds(5));
+        _desktop.SetOwnFrame(game, FakeWindowSystem.Popup, Rect.FromPosition(200, 200, new Size(800, 600)));
+        Assert.Equal(TrackedState.Restyled, Assert.Single(controller.TrackedWindows).State);
+        _time.Advance(TimeSpan.FromSeconds(5));
+
+        _desktop.SetOwnFrame(game, game.Style, Primary.Bounds);
+
+        Assert.Equal(FakeWindowSystem.Popup, game.Style);
+        Assert.Empty(controller.Stop());
+        Assert.Equal(FakeWindowSystem.Popup, game.Style);
+        Assert.Equal(Primary.Bounds, game.Client);
+    }
+
+    [Fact]
+    public void A_maximised_frameless_game_that_goes_topmost_as_it_fills_its_monitor_gets_maximised_again()
+    {
+        // F8: stripping takes WS_MAXIMIZE off, so it is owed like the frame bits are.
+        var controller = StartController();
+        var maximised = Plus(FakeWindowSystem.Popup, WindowStyle.WS_MAXIMIZE);
+        var game = _desktop.Open(_desktop.StartProcess(Dota), maximised, Primary.WorkArea);
+        Assert.Equal(0u, game.Style.Style & WindowStyle.WS_MAXIMIZE);
+
+        _desktop.SetOwnFrame(game, Plus(game.Style, exBits: WS_EX_TOPMOST), Primary.Bounds);
+
+        Assert.Equal(TrackedState.Fullscreen, Assert.Single(controller.TrackedWindows).State);
+        Assert.Equal(Plus(maximised, exBits: WS_EX_TOPMOST), game.Style);
+        Assert.Empty(controller.Stop());
+        Assert.Equal(Plus(maximised, exBits: WS_EX_TOPMOST), game.Style);
+    }
+
+    [Fact]
+    public void A_maximised_frameless_game_whose_put_back_fails_gets_maximised_again_on_quit()
+    {
+        var controller = StartController();
+        var maximised = Plus(FakeWindowSystem.Popup, WindowStyle.WS_MAXIMIZE);
+        var game = _desktop.Open(_desktop.StartProcess(Dota), maximised, Primary.WorkArea);
+        _desktop.FailNextChanges(game, ChangeResult.Failed);
+
+        _desktop.SetOwnFrame(game, Plus(game.Style, exBits: WS_EX_TOPMOST), Primary.Bounds);
+
+        Assert.Equal(0u, game.Style.Style & WindowStyle.WS_MAXIMIZE);
+        Assert.Empty(controller.Stop());
+        Assert.Equal(Plus(maximised, exBits: WS_EX_TOPMOST), game.Style);
+    }
+
+    [Fact]
+    public void A_released_game_whose_border_was_put_back_and_that_goes_windowed_with_it_is_stripped_and_owes_it_again()
+    {
+        // The border is the game's again once it is back, so the next strip owes it afresh.
+        var controller = StartController();
+        var game = OpenThickPopup();
+        _desktop.SetOwnFrame(game, game.Style, Primary.Bounds);
+        Assert.Equal(ThickPopup, game.Style);
+        _time.Advance(TimeSpan.FromSeconds(5));
+        _desktop.SetOwnFrame(game, game.Style, Rect.FromPosition(200, 200, new Size(816, 608)));
+        Assert.Equal(FakeWindowSystem.Popup, game.Style);
+        _time.Advance(TimeSpan.FromSeconds(5));
+
+        _desktop.SetOwnFrame(game, game.Style, Primary.Bounds);
+
+        Assert.Equal(ThickPopup, game.Style);
+        Assert.Equal(Primary.Bounds, game.Client);
+        Assert.Empty(controller.Stop());
+        Assert.Equal(ThickPopup, game.Style);
+    }
+
+    [Fact]
+    public void A_game_a_modal_dialog_disabled_stays_disabled_when_quitting_puts_its_title_bar_back()
+    {
+        // Putting back the title bar is the app's; the WS_DISABLED is the game's, and stays.
+        var controller = StartController();
+        var game = OpenGame();
+
+        _desktop.SetOwnFrame(game, Plus(game.Style, WS_DISABLED), game.Outer);
+
+        Assert.Empty(controller.Stop());
+        AssertFrame(game, GameOriginal with { Style = Plus(FakeWindowSystem.Captioned, WS_DISABLED) });
     }
 
     [Fact]
