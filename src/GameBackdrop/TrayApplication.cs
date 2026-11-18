@@ -13,7 +13,7 @@ namespace GameBackdrop;
 /// The tray icon and its menu, and the wiring: settings → game list → controller over the Win32
 /// window system, and the hotkey that toggles the backdrop for the game in front. Every changed
 /// game window is put back when the app quits, however it quits. A game running as administrator
-/// gets a notice that offers to restart the app as administrator.
+/// gets a notice that offers to always run the app as administrator.
 /// </summary>
 internal sealed class TrayApplication : ApplicationContext
 {
@@ -24,22 +24,25 @@ internal sealed class TrayApplication : ApplicationContext
     private static readonly bool Elevated = Environment.IsPrivilegedProcess;
 
     private readonly NotifyIcon _icon;
-    private readonly ToolStripMenuItem _restartItem;
     private readonly Win32WindowSystem _windows;
     private readonly BackdropController _controller;
     private readonly StartAtLogon _startAtLogon;
+    private readonly AlwaysAsAdministrator _always;
     private readonly GameListModel _games;
     private GameListForm? _list;
     private readonly GlobalHotkey? _hotkey;
     private bool _failureReported;
     private readonly string? _settingsArgument;
     private bool _crashing;
-    private bool _balloonOffersRestart;
-    private bool _restarting;
+    private bool _balloonOffersAlwaysAsAdministrator;
+    private bool _handingOver;
 
     /// <param name="settingsArgument">The <c>--settings</c> path the app was started with, if
-    /// any, so a restart as administrator uses the same file.</param>
-    public TrayApplication(SettingsStore settings, StartAtLogon startAtLogon, string? settingsArgument)
+    /// any, so the elevated copy uses the same file.</param>
+    /// <param name="setUpTask">This is the elevated copy that a copy turning on "Always run as
+    /// administrator" started: set the task up.</param>
+    public TrayApplication(SettingsStore settings, StartAtLogon startAtLogon, AlwaysAsAdministrator always,
+        string? settingsArgument, bool setUpTask)
     {
         _settingsArgument = settingsArgument;
         // The window system posts its events here; Application.Run would install it too, but
@@ -55,24 +58,26 @@ internal sealed class TrayApplication : ApplicationContext
         _controller.GameRunsAsAdministrator += ShowAdministratorNotice;
 
         _startAtLogon = startAtLogon;
+        _always = always;
         var startAtLogonItem = new ToolStripMenuItem("Start at logon");
         startAtLogonItem.Click += (_, _) => ToggleStartAtLogon();
-
-        // Shown once a game running as administrator has been seen, for when its notice is gone.
-        _restartItem = new ToolStripMenuItem("Restart as administrator", null, (_, _) => RestartAsAdministrator()) { Visible = false };
+        var alwaysItem = new ToolStripMenuItem("Always run as administrator");
+        alwaysItem.Click += (_, _) => ToggleAlwaysAsAdministrator();
         var menu = new ContextMenuStrip();
         var openList = new ToolStripMenuItem("Open list", null, (_, _) => ShowList());
         openList.Font = new Font(openList.Font, FontStyle.Bold);
         menu.Items.Add(openList);
         menu.Items.Add(startAtLogonItem);
-        menu.Items.Add(_restartItem);
+        menu.Items.Add(alwaysItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Quit", null, (_, _) => ExitThread());
-        // Read fresh each time: the shortcut or the settings file may have changed outside the app.
+        // Read fresh each time: the shortcut, the task or the settings file may have changed outside
+        // the app. A task that can't be read shows as off rather than failing the menu.
         menu.Opening += (_, _) =>
         {
-            startAtLogonItem.Checked = _startAtLogon.IsOn;
+            startAtLogonItem.Checked = ReadTask(() => _startAtLogon.IsOn);
             startAtLogonItem.Enabled = _startAtLogon.CanRecord;
+            alwaysItem.Checked = ReadTask(() => _always.IsOn);
         };
         _icon = new NotifyIcon
         {
@@ -87,7 +92,7 @@ internal sealed class TrayApplication : ApplicationContext
         };
         _icon.BalloonTipClicked += (_, _) =>
         {
-            if (_balloonOffersRestart) RestartAsAdministrator();
+            if (_balloonOffersAlwaysAsAdministrator) TurnOnAlwaysAsAdministrator();
         };
 
         Application.ThreadException += (_, e) => Crash(e.Exception);
@@ -100,6 +105,19 @@ internal sealed class TrayApplication : ApplicationContext
         if (_games.LoadStatus == SettingsLoadStatus.Corrupt)
             notices.Add($"The settings file couldn't be read, so no games are listed. It is left as it is until the list " +
                 $"is changed, and then kept beside it as a .corrupt copy: {settings.FilePath}");
+
+        if (setUpTask)
+        {
+            try
+            {
+                _always.SetUp();
+                notices.Add("Game Backdrop now always runs as administrator, with no prompt. Untick it in this menu to stop.");
+            }
+            catch (Exception e) when (AlwaysAsAdministrator.IsTaskSchedulerError(e))
+            {
+                notices.Add($"Couldn't set Game Backdrop up to always run as administrator: {e.Message}");
+            }
+        }
 
         try
         {
@@ -152,7 +170,7 @@ internal sealed class TrayApplication : ApplicationContext
     /// <summary>
     /// A listed game runs as administrator, so its window refused to change. Raised once per run
     /// of the game. Unless the app already runs as administrator, clicking the notice (or the tray
-    /// menu item) restarts it as administrator.
+    /// menu item) turns on always running it as administrator.
     /// </summary>
     private void ShowAdministratorNotice(GameEntry game)
     {
@@ -163,50 +181,99 @@ internal sealed class TrayApplication : ApplicationContext
                 ToolTipIcon.Warning);
             return;
         }
-        _restartItem.Visible = true;
         ShowBalloon(10000, $"{game.Name} runs as administrator",
-            "Game Backdrop can't change the game's window unless it runs as administrator too. Click here to restart Game Backdrop as administrator.",
-            ToolTipIcon.Info, offersRestart: true);
+            "Game Backdrop can't change the game's window unless it runs as administrator too. Click here to always run Game Backdrop as administrator.",
+            ToolTipIcon.Info, offersAlwaysAsAdministrator: true);
     }
 
-    /// <summary>Show a tray notice. A click on it restarts the app as administrator only if this one offered that.</summary>
-    private void ShowBalloon(int timeout, string title, string text, ToolTipIcon icon, bool offersRestart = false)
+    /// <summary>Show a tray notice. A click on it turns on always running as administrator only if this one offered that.</summary>
+    private void ShowBalloon(int timeout, string title, string text, ToolTipIcon icon, bool offersAlwaysAsAdministrator = false)
     {
-        _balloonOffersRestart = offersRestart;
+        _balloonOffersAlwaysAsAdministrator = offersAlwaysAsAdministrator;
         _icon.ShowBalloonTip(timeout, title, text, icon);
     }
 
+    /// <summary>A read of the task for the menu: one that fails shows as off.</summary>
+    private static bool ReadTask(Func<bool> read)
+    {
+        try
+        {
+            return read();
+        }
+        catch (Exception e) when (AlwaysAsAdministrator.IsTaskSchedulerError(e))
+        {
+            return false;
+        }
+    }
+
+    private void ToggleAlwaysAsAdministrator()
+    {
+        if (ReadTask(() => _always.IsOn)) TurnOffAlwaysAsAdministrator();
+        else TurnOnAlwaysAsAdministrator();
+    }
+
     /// <summary>
-    /// Put every game back, then start an elevated copy (the UAC prompt) and quit. The new copy
+    /// Running as administrator already: set the task up here. Otherwise put every game back, then
+    /// start an elevated copy (the one UAC prompt) that sets the task up, and quit. The new copy
     /// saves each window as it finds it as the original, so it is started only once every game is
     /// back; it is told to take over, and waits for this one to release the single-instance
     /// guard, so the two never both act on a window. A game that can't be put back, or a declined
     /// prompt, leaves this copy running, with its games changed again.
     /// </summary>
-    private void RestartAsAdministrator()
+    private void TurnOnAlwaysAsAdministrator()
     {
-        if (_restarting || Elevated) return;
-        _restarting = true;
-        var result = _controller.HandOver(StartElevatedCopy, RestoreRetries, () => Thread.Sleep(RestoreRetryDelay));
-        if (result.HandedOver)
+        if (_handingOver) return;
+        _handingOver = true;
+        try
         {
-            ExitThread();
-            return;
+            var result = _always.TurnOn(Elevated, _controller, StartElevatedCopy, RestoreRetries, () => Thread.Sleep(RestoreRetryDelay));
+            if (result is null)
+            {
+                ShowBalloon(5000, "Game Backdrop", "Game Backdrop now always runs as administrator, with no prompt.", ToolTipIcon.Info);
+            }
+            else if (result.HandedOver)
+            {
+                ExitThread();
+                return;
+            }
+            else if (result.NotRestored.Count > 0)
+            {
+                ShowBalloon(10000, "Couldn't switch to running as administrator",
+                    $"These game windows couldn't be put back first, so Game Backdrop carries on as it was:\n{Names(result.NotRestored)}",
+                    ToolTipIcon.Warning);
+            }
         }
-        _restarting = false;
-        if (result.NotRestored.Count > 0)
+        catch (Exception e) when (AlwaysAsAdministrator.IsTaskSchedulerError(e))
         {
-            ShowBalloon(10000, "Couldn't restart as administrator",
-                $"These game windows couldn't be put back first, so Game Backdrop carries on as it was:\n{Names(result.NotRestored)}",
-                ToolTipIcon.Warning);
+            ShowBalloon(5000, "Game Backdrop", $"Couldn't set Game Backdrop up to always run as administrator: {e.Message}", ToolTipIcon.Warning);
+        }
+        _handingOver = false;
+    }
+
+    /// <summary>
+    /// Delete the task, and put the Startup shortcut back if Start at logon is on. This copy keeps
+    /// running as administrator until it quits; the next launch is a normal one.
+    /// </summary>
+    private void TurnOffAlwaysAsAdministrator()
+    {
+        try
+        {
+            _always.TurnOff();
+            if (Elevated)
+                ShowBalloon(5000, "Game Backdrop", "Game Backdrop stays running as administrator until it quits; the next start is a normal one.", ToolTipIcon.Info);
+        }
+        catch (Exception e) when (AlwaysAsAdministrator.IsTaskSchedulerError(e))
+        {
+            ShowBalloon(5000, "Game Backdrop", $"Couldn't stop always running as administrator: {e.Message}", ToolTipIcon.Warning);
         }
     }
 
-    /// <summary>Start the elevated copy that takes over. False if it didn't start (the UAC prompt was declined, or it failed).</summary>
+    /// <summary>Start the elevated copy that sets the task up and takes over. False if it didn't start (the UAC prompt was declined, or it failed).</summary>
     private bool StartElevatedCopy()
     {
         var start = new ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = true, Verb = "runas" };
         start.ArgumentList.Add(Program.TakeoverFlag);
+        start.ArgumentList.Add(Program.SetUpTaskFlag);
         if (_settingsArgument is not null)
         {
             start.ArgumentList.Add("--settings");
@@ -222,7 +289,7 @@ internal sealed class TrayApplication : ApplicationContext
         }
         catch (Win32Exception e)
         {
-            ShowBalloon(5000, "Game Backdrop", $"Couldn't restart as administrator: {e.Message}", ToolTipIcon.Warning);
+            ShowBalloon(5000, "Game Backdrop", $"Couldn't start Game Backdrop as administrator: {e.Message}", ToolTipIcon.Warning);
             return false;
         }
         return true;

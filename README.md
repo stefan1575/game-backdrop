@@ -26,6 +26,14 @@ nothing is injected into the game.
 If you move the exe, run it once from its new place: with Start at logon on, the shortcut is
 rewritten to point at the exe that's running.
 
+A game that runs as administrator can only be changed by an app that does too. Tick **Always
+run as administrator** in the tray menu, or click the notice such a game brings up: after one UAC
+prompt, the app sets up a Task Scheduler task (`\Game Backdrop`, run level highest, for you
+only) and every start goes through it, elevated and with no prompt. While the task is there it
+also starts the app at logon, in place of the Startup shortcut. Untick it to delete the task; the
+next start is a normal one. A task left pointing at an exe that moved is ignored: tick it again
+from the new place.
+
 The game list lives in `%APPDATA%\GameBackdrop\settings.json`:
 
 ```json
@@ -37,7 +45,7 @@ The game list lives in `%APPDATA%\GameBackdrop\settings.json`:
 }
 ```
 
-To uninstall: untick **Start at logon**, quit from the tray, then delete the exe and
+To uninstall: untick **Always run as administrator** and **Start at logon**, quit from the tray, then delete the exe and
 `%APPDATA%\GameBackdrop`.
 
 ## Build, test and publish
@@ -56,4 +64,5 @@ tests and publishes on every push and PR, and keeps the exe as the `GameBackdrop
 pushes to `main`.
 
 `GameBackdrop.exe --settings <path>` runs against another settings file and keeps its Start at
-logon shortcut in a `Startup` folder beside that file, leaving your real setup alone.
+logon shortcut in a `Startup` folder beside that file, and its Always run as administrator task
+under a name of its own, leaving your real setup alone.
