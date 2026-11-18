@@ -27,6 +27,12 @@ F borderless fullscreen, R next size; or `--mode fullscreen`, `--size 1280x720`)
 in a settings file and start the app with `--settings <path>` to leave the real
 `%APPDATA%\GameBackdrop\settings.json` alone.
 
+Screenshots (a visible change needs a before and after): use the evidence harness on the
+`evidence` branch (`harness/README.md`). Add a scenario for the PR, run it on `main` for `before-`
+and on the PR for `after-`, and publish with the queue runner's `evidence.py publish --into
+pr-<n>`. Never `evidence.py screen`: it captures Stefan's whole desktop, other programs included.
+A state only Stefan can reach (a UAC prompt) is `Screenshot owed: <why>`.
+
 Layout: `src/GameBackdrop.Core` (no Win32: settings, game list, classifier, placement, and the
 `BackdropController` over the `IWindowSystem` port), `src/GameBackdrop.Windows` (the Win32
 port), `src/GameBackdrop` (tray app), `tests/GameBackdrop.Core.Tests` (a `FakeWindowSystem`
