@@ -172,9 +172,11 @@ public sealed class MouseClipTests
         StartController();
         var game = OpenGame();
 
+        // The controller centres the game again where it resized itself to; the clip is its client area there.
         _desktop.Move(game, Rect.FromPosition(400, 200, new Size(1024, 768)));
 
-        Assert.Equal(new Rect(400, 200, 1424, 968), _desktop.CursorClip);
+        Assert.Equal(game.Client, _desktop.CursorClip);
+        Assert.Equal(new Size(1024, 768), _desktop.CursorClip!.Value.Size);
     }
 
     [Fact]

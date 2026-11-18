@@ -86,6 +86,29 @@ public sealed class SettingsStoreTests : IDisposable
         Assert.Equal("Renamed", (string?)json["games"]![0]!["displayName"]);
     }
 
+    [Fact]
+    public void The_hotkey_is_read_from_the_file_and_kept_through_a_save()
+    {
+        Directory.CreateDirectory(_folder);
+        File.WriteAllText(FilePath, """{ "hotkey": "Ctrl+Shift+F9", "games": [] }""");
+        var store = new SettingsStore(FilePath);
+
+        var settings = store.Load().Settings;
+        Assert.Equal("Ctrl+Shift+F9", settings.Hotkey);
+        store.Save(settings);
+
+        Assert.Equal("Ctrl+Shift+F9", store.Load().Settings.Hotkey);
+    }
+
+    [Fact]
+    public void A_file_without_a_hotkey_names_none()
+    {
+        Directory.CreateDirectory(_folder);
+        File.WriteAllText(FilePath, """{ "games": [] }""");
+
+        Assert.Null(new SettingsStore(FilePath).Load().Settings.Hotkey);
+    }
+
     [Theory]
     [InlineData("{ not json")]
     [InlineData("")]
