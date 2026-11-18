@@ -1,0 +1,31 @@
+[
+  {
+    "name": "tray-menu",
+    "items": [
+      "Open list",
+      "Quit"
+    ]
+  },
+  {
+    "name": "picker",
+    "rows": 9,
+    "hiddenRows": 8
+  },
+  {
+    "name": "game-after-add",
+    "style": "0x14020000",
+    "outer": "(880,420) 800x600",
+    "visibleBackdrops": 1
+  },
+  {
+    "name": "settings-after-add",
+    "json": "{\r\n  \u0022hotkey\u0022: null,\r\n  \u0022games\u0022: [\r\n    {\r\n      \u0022exePath\u0022: \u0022C:\\\\Games\\\\Example\\\\example.exe\u0022,\r\n      \u0022displayName\u0022: \u0022Example game\u0022,\r\n      \u0022enabled\u0022: false,\r\n      \u0022keepMouseInside\u0022: false\r\n    },\r\n    {\r\n      \u0022exePath\u0022: \u0022C:\\\\Users\\\\Anon\\\\.t3\\\\worktrees\\\\game-backdrop\\\\claude-fix-pr18-54606c9-8c812890d10cc6bd\\\\tools\\\\TestWindow\\\\bin\\\\Release\\\\net10.0-windows\\\\win-x64\\\\TestWindow.exe\u0022,\r\n      \u0022displayName\u0022: \u0022Game Backdrop test window\u0022,\r\n      \u0022enabled\u0022: true,\r\n      \u0022keepMouseInside\u0022: true\r\n    }\r\n  ]\r\n}"
+  },
+  {
+    "name": "second-launch",
+    "exited": true,
+    "exitCode": 0,
+    "listOpened": true,
+    "listInFront": true
+  }
+]

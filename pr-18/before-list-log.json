@@ -1,0 +1,19 @@
+[
+  {
+    "name": "tray-menu",
+    "items": [
+      "Quit"
+    ]
+  },
+  {
+    "name": "list-window",
+    "present": false
+  },
+  {
+    "name": "second-launch",
+    "exited": true,
+    "exitCode": 0,
+    "listOpened": false,
+    "listInFront": false
+  }
+]
