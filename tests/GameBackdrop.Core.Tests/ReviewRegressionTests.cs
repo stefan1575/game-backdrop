@@ -307,6 +307,26 @@ public sealed class ReviewRegressionTests
     }
 
     [Fact]
+    public void A_released_game_that_sets_its_own_border_and_then_drops_it_again_itself_owes_nothing_on_quit()
+    {
+        // The put-back failed, so the border was owed; the game then set a border of its own and
+        // took it off again. Both are the game's choices: by then nothing of the app's is left.
+        var controller = StartController();
+        var game = OpenThickPopup();
+        var stripped = game.Style;
+        _desktop.FailNextChanges(game, ChangeResult.Failed);
+        _desktop.SetOwnFrame(game, stripped, Primary.Bounds);
+        _desktop.SetOwnFrame(game, ThickPopup, new Rect(-8, -8, 1928, 1088));
+
+        _desktop.SetOwnFrame(game, stripped, Primary.Bounds);
+
+        var changes = _desktop.FrameChanges.Count;
+        Assert.Empty(controller.Stop());
+        Assert.Equal(changes, _desktop.FrameChanges.Count);
+        Assert.Equal(stripped, game.Style);
+    }
+
+    [Fact]
     public void A_game_a_modal_dialog_disabled_stays_disabled_when_quitting_puts_its_title_bar_back()
     {
         // Putting back the title bar is the app's; the WS_DISABLED is the game's, and stays.
