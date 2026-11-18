@@ -501,7 +501,14 @@ try
         void Both(string name, string scene, nint game, int pid)
         {
             Shot(name, scene, game);
-            if (Backdrop(pid) != "no backdrop") Monitor(name + "-monitor", scene, game, pid, W.EnsureForeground(game));
+            if (Backdrop(pid) == "no backdrop") return;
+            // A real screen capture (ScreenShot: only while the black covers the monitor, any other
+            // program's window masked), with the game in front so its fullscreen mark drops the
+            // taskbar behind the black. Activation is retried until the game is the foreground.
+            var activated = W.EnsureForeground(game);
+            for (var i = 0; i < 5 && W.Foreground() != game; i++) { Thread.Sleep(500); activated = W.EnsureForeground(game); }
+            Thread.Sleep(800);
+            ScreenShot(name + "-screen", scene, game, pid, activated);
         }
         // The monitor as the two windows make it up: the backdrop's own pixels over its rect, then
         // the game's over its rect, each from PrintWindow, in their real Z order. Built from the
