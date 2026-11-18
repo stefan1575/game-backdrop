@@ -25,7 +25,8 @@ dotnet publish src/GameBackdrop -c Release   # single-file exe
 Checking the real Win32 path by hand: `tools/TestWindow` is a stand-in game (keys W windowed,
 F borderless fullscreen, R next size; or `--mode fullscreen`, `--size 1280x720`). List its exe
 in a settings file and start the app with `--settings <path>` to leave the real
-`%APPDATA%\GameBackdrop\settings.json` alone.
+`%APPDATA%\GameBackdrop\settings.json` alone; such a run also keeps its Start at logon shortcut in
+a `Startup` folder beside that settings file, never in the real Startup folder.
 
 Screenshots (a visible change needs a before and after): use the evidence harness on the
 `evidence` branch (`harness/README.md`). Add a scenario for the PR, run it on `main` for `before-`
@@ -33,8 +34,9 @@ and on the PR for `after-`. Never capture the whole desktop: it shows other prog
 A state a script can't reach (a UAC prompt) is `Screenshot owed: <why>`.
 
 Layout: `src/GameBackdrop.Core` (no Win32: settings, game list, classifier, placement, and the
-`BackdropController` over the `IWindowSystem` port), `src/GameBackdrop.Windows` (the Win32
-port), `src/GameBackdrop` (tray app), `tests/GameBackdrop.Core.Tests` (a `FakeWindowSystem`
+`BackdropController` over the `IWindowSystem` port, and `StartAtLogon` over the
+`IStartupShortcut` port), `src/GameBackdrop.Windows` (the Win32
+side of both ports), `src/GameBackdrop` (tray app), `tests/GameBackdrop.Core.Tests` (a `FakeWindowSystem`
 drives the controller), `tests/GameBackdrop.Windows.Tests` (the Win32 port against real
 `TestWindow` windows; `dotnet test` briefly opens a few of them, and they need the solution
 built first in the same configuration).

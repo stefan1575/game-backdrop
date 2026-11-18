@@ -123,12 +123,36 @@ public sealed class GameListModel
         _corruptFileToKeep = false;
     }
 
+    /// <summary>
+    /// The Start at logon choice as the file records it now: <see cref="Startup.StartAtLogon"/>
+    /// writes it while the list is open, so the copy read at load may be out of date, and a list
+    /// change must not undo it. Falls back to that copy while the file can't be read.
+    /// </summary>
+    private bool? RecordedStartAtLogon()
+    {
+        try
+        {
+            var current = _store.Load();
+            return current.Status == SettingsLoadStatus.Loaded ? current.Settings.StartAtLogon : _settings.StartAtLogon;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return _settings.StartAtLogon;
+        }
+    }
+
     private static string? NameOrNull(string? name) => string.IsNullOrWhiteSpace(name) ? null : name.Trim();
 
     /// <summary>Save the settings with this game list, then make it the current one and announce it.</summary>
     private void Commit(List<GameEntry> games)
     {
-        var next = new AppSettings { Hotkey = _settings.Hotkey, Games = games, UnknownFields = _settings.UnknownFields };
+        var next = new AppSettings
+        {
+            Hotkey = _settings.Hotkey,
+            Games = games,
+            StartAtLogon = RecordedStartAtLogon(),
+            UnknownFields = _settings.UnknownFields,
+        };
         try
         {
             if (_corruptFileToKeep) KeepCorruptFile();

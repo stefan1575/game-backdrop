@@ -17,6 +17,14 @@ public sealed class AppSettings
     [JsonPropertyName("games")]
     public List<GameEntry> Games { get; set; } = [];
 
+    /// <summary>
+    /// Whether the app starts at logon (a shortcut in the Startup folder). Null until the first
+    /// run records it on, so a later "off" sticks.
+    /// </summary>
+    [JsonPropertyName("startAtLogon")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? StartAtLogon { get; set; }
+
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? UnknownFields { get; set; }
 }

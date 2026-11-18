@@ -20,6 +20,22 @@ public sealed class GameListModelTests : IDisposable
     /// <summary>The list as the settings file holds it now, read by a fresh store.</summary>
     private List<GameEntry> Saved() => new SettingsStore(FilePath).Load().Settings.Games;
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void A_list_change_keeps_the_start_at_logon_choice_recorded_while_the_list_was_open(bool recorded)
+    {
+        var model = Open();
+        var store = new SettingsStore(FilePath);
+        var settings = store.Load().Settings;
+        settings.StartAtLogon = recorded;
+        store.Save(settings);
+
+        model.Add(Dota, "Dota 2");
+
+        Assert.Equal(recorded, new SettingsStore(FilePath).Load().Settings.StartAtLogon);
+    }
+
     [Fact]
     public void An_added_game_is_saved_at_once_switched_on_with_the_mouse_kept_inside()
     {
