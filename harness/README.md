@@ -7,7 +7,7 @@ tray menu (UI Automation).
 
 ```
 dotnet build -c Release -o out
-out\Evidence.exe <outDir> <main|wrap|round3|backdrop|fgprobe|fgprobe2> <GameBackdrop.exe> <TestWindow.exe> <temp settings.json>
+out\Evidence.exe <outDir> <main|wrap|round3|backdrop|fgprobe|fgprobe2|live|list> <GameBackdrop.exe> <TestWindow.exe> <temp settings.json>
 ```
 
 Scenarios live in `Program.cs` (`main`: windowed, menus, fullscreen, Quit; `wrap`: wrapped menu;
@@ -25,6 +25,14 @@ Scenarios live in `Program.cs` (`main`: windowed, menus, fullscreen, Quit; `wrap
   new resolution; a maximised frameless game that goes topmost and fills its monitor; a game
   disabled (as under a modal dialog) at Quit; a fullscreen game opened while the app runs. Run on
   main for the `before-` pictures and on the PR for the `after-` ones.
+- `list` (PR #18, `pr-18/`): the tray menu, "Open list", the "Add from open windows" picker
+  with the test window picked, the list after "Add", and a second launch (does the running copy's
+  list open?). The settings start with one switched-off game. A sixth argument names the
+  pictures' prefix (`before` on main, `after` on the PR). Window pictures are the app's own
+  windows (`PrintWindow`), the tray menu from the screen over its own rect; in the picker, rows
+  of other programs' windows are painted over before the picture is saved. Buttons that open a
+  modal dialog are clicked with a posted `BM_CLICK`, not UI Automation's Invoke, which would
+  leave later UIA calls into the app timing out.
 - `fgprobe2` (PR #12 diagnosis, defect A): a harness window is the foreground while the game is
   restyled, then the game is activated; three rounds. Log only.
 

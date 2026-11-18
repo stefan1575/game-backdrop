@@ -631,6 +631,93 @@ try
         Shot("9-fullscreen-left-alone", $"9. Borderless-fullscreen game opened while the app runs: {Backdrop(app4.Id)}", full);
         Quit(app4);
     }
+    else if (scenario == "list")
+    {
+        // PR #18 (the game list window): the tray menu, the list, the "Add from open windows"
+        // picker, the list with the picked game on it, and a second launch. Run on main for the
+        // before- pictures and on the PR for the after- ones. Pictures are each app window's own
+        // pixels (PrintWindow; the tray menu, a topmost window, from the screen over its own rect
+        // only). In the picker, rows of other programs' windows are painted over before saving.
+        var prefix = args.Length > 5 ? args[5] : "shot";
+        const string testTitle = "Game Backdrop test window";
+        File.WriteAllText(settingsPath, JsonSerializer.Serialize(new
+        {
+            games = new[] { new { exePath = @"C:\Games\Example\example.exe", displayName = "Example game", enabled = false, keepMouseInside = false } },
+        }));
+        var game = WaitWindow(Launch(testExe, "--size 800x600"));
+        var app = Launch(appExe, $"--settings \"{settingsPath}\"");
+        Thread.Sleep(2500);
+
+        var menu = U.OpenTrayMenu(app);
+        U.SaveCaptioned(Path.Combine(outDir, $"{prefix}-01-tray-menu.png"), U.FromScreen(menu), "Tray icon's menu (right-click)");
+        var items = U.MenuItems(menu);
+        log.Add(new { name = "tray-menu", items });
+        Console.WriteLine($"tray menu: {string.Join(", ", items)}");
+
+        var openList = U.Find(menu, "Open list", ControlType.MenuItem);
+        if (openList is null)
+        {
+            Console.WriteLine("no Open list item: this build has no list window");
+            log.Add(new { name = "list-window", present = false });
+            W.PostMessage(menu, 0x0100, 0x1B, 0); // Escape closes the menu
+            Thread.Sleep(500);
+        }
+        else
+        {
+            U.InvokeAsync(openList);
+            var list = U.WaitWindow(app.Id, "Game Backdrop: games");
+            Thread.Sleep(800);
+            U.SaveCaptioned(Path.Combine(outDir, $"{prefix}-02-list.png"), W.Print(list, W.Describe(list).Outer), "\"Open list\": the game list window");
+
+            U.Click(U.Find(list, "Add from open windows…", ControlType.Button)!);
+            var picker = U.WaitWindow(app.Id, "Add from open windows");
+            Thread.Sleep(1200);
+            var row = U.Rows(picker).FirstOrDefault(r => r.Current.Name == testTitle) ?? throw new Exception("test window not in the picker");
+            ((SelectionItemPattern)row.GetCurrentPattern(SelectionItemPattern.Pattern)).Select();
+            Thread.Sleep(500);
+            var po = W.Describe(picker).Outer;
+            using (var shot = W.Print(picker, po))
+            {
+                var hidden = 0;
+                using (var g = Graphics.FromImage(shot))
+                using (var font = new Font("Segoe UI", 9))
+                {
+                    foreach (var r in U.Rows(picker).Where(r => r.Current.Name != testTitle))
+                    {
+                        var b = r.Current.BoundingRectangle;
+                        if (b.IsEmpty) continue;
+                        var rect = new Rectangle((int)b.X - po.X, (int)b.Y - po.Y, (int)b.Width, (int)b.Height);
+                        g.FillRectangle(Brushes.Gainsboro, rect);
+                        g.DrawString("another program's window (hidden in this picture)", font, Brushes.DimGray, rect.X + 6, rect.Y + 2);
+                        hidden++;
+                    }
+                }
+                log.Add(new { name = "picker", rows = U.Rows(picker).Count, hiddenRows = hidden });
+                U.SaveCaptioned(Path.Combine(outDir, $"{prefix}-03-picker.png"), new Bitmap(shot), "\"Add from open windows…\": the test window picked (other programs' rows painted over)");
+            }
+
+            U.Click(U.Find(picker, "Add", ControlType.Button)!);
+            Thread.Sleep(2500);
+            U.SaveCaptioned(Path.Combine(outDir, $"{prefix}-04-list-with-game.png"), W.Print(list, W.Describe(list).Outer), "After \"Add\": the game is on the list, switched on, and backdropped at once");
+            var d = W.Describe(game);
+            log.Add(new { name = "game-after-add", style = $"0x{d.Style:X8}", outer = d.Outer.ToString(), visibleBackdrops = W.Backdrops(app.Id).Count(W.IsVisible) });
+            log.Add(new { name = "settings-after-add", json = File.ReadAllText(settingsPath) });
+            Console.WriteLine(File.ReadAllText(settingsPath));
+            U.CloseWindow(list);
+            Thread.Sleep(800);
+        }
+
+        // A second launch: exits at once; on the PR it opens the running copy's list.
+        var second = Launch(appExe, $"--settings \"{settingsPath}\"");
+        var exited = second.WaitForExit(10000);
+        Thread.Sleep(1500);
+        var listAgain = U.FindWindow(app.Id, "Game Backdrop: games");
+        log.Add(new { name = "second-launch", exited, exitCode = exited ? second.ExitCode : (int?)null, listOpened = listAgain != 0, listInFront = listAgain != 0 && W.Foreground() == listAgain });
+        Console.WriteLine($"second launch: exited {exited}, list opened {listAgain != 0}");
+        if (listAgain != 0) U.CloseWindow(listAgain);
+        Thread.Sleep(500);
+        Quit(app);
+    }
     else if (scenario == "wrap")
     {
         var wrap = WaitWindow(Launch(testExe, "--size 400x600 --menu-items 14"));
@@ -717,6 +804,8 @@ static class W
     [DllImport("user32.dll")] static extern nint GetAncestor(nint h, uint flags);
     public static nint TopLevelAt(int x, int y) => GetAncestor(WindowFromPoint(new POINT { X = x, Y = y }), 2); // GA_ROOT
     public static bool IsVisible(nint h) => IsWindowVisible(h);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(nint h, StringBuilder s, int n);
+    public static string TitleOf(nint h) { var sb = new StringBuilder(512); GetWindowText(h, sb, 512); return sb.ToString(); }
     public static bool Minimised(nint h) => IsIconic(h);
     public static nint Foreground() => GetForegroundWindow();
     public static nint FindTray() => FindWindow("Shell_TrayWnd", null);
@@ -825,5 +914,95 @@ static class W
         PrintWindow(h, dc, 2); // PW_RENDERFULLCONTENT
         g.ReleaseHdc(dc);
         return bmp;
+    }
+}
+
+// UI Automation and pictures for the "list" scenario (PR #18).
+static class U
+{
+    public static AutomationElement? Find(int pid, string name, ControlType type) =>
+        AutomationElement.RootElement.FindFirst(TreeScope.Descendants, new AndCondition(
+            new PropertyCondition(AutomationElement.ProcessIdProperty, pid),
+            new PropertyCondition(AutomationElement.NameProperty, name),
+            new PropertyCondition(AutomationElement.ControlTypeProperty, type)));
+
+    public static AutomationElement? Find(nint window, string name, ControlType type) =>
+        AutomationElement.FromHandle(window).FindFirst(TreeScope.Descendants, new AndCondition(
+            new PropertyCondition(AutomationElement.NameProperty, name),
+            new PropertyCondition(AutomationElement.ControlTypeProperty, type)));
+
+    public static List<string> MenuItems(nint menu) =>
+        AutomationElement.FromHandle(menu).FindAll(TreeScope.Descendants,
+            new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.MenuItem))
+        .Cast<AutomationElement>().Select(e => e.Current.Name).ToList();
+
+    public static List<AutomationElement> Rows(nint window) =>
+        AutomationElement.FromHandle(window).FindAll(TreeScope.Descendants,
+            new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.ListItem)).Cast<AutomationElement>().ToList();
+
+    // Invoking a button that opens a modal dialog can block until the dialog closes.
+    public static void InvokeAsync(AutomationElement e) =>
+        new Thread(() => { try { ((InvokePattern)e.GetCurrentPattern(InvokePattern.Pattern)).Invoke(); } catch { } }) { IsBackground = true }.Start();
+
+    // A button that opens a modal dialog: posted BM_CLICK, so no UI Automation call is left
+    // waiting inside the dialog's message loop (later UIA calls into the app would time out).
+    public static void Click(AutomationElement button) => W.PostMessage((nint)button.Current.NativeWindowHandle, 0x00F5, 0, 0);
+
+    public static nint FindWindow(int pid, string title)
+    {
+        // The app's own visible top-level windows (an owned dialog is top-level too), by title.
+        foreach (var h in W.WindowsOf(pid).Where(W.IsVisible))
+            if (W.TitleOf(h) == title) return h;
+        return 0;
+    }
+
+    public static nint WaitWindow(int pid, string title)
+    {
+        for (var i = 0; i < 80; i++)
+        {
+            var h = FindWindow(pid, title);
+            if (h != 0) return h;
+            Thread.Sleep(100);
+        }
+        throw new Exception($"window \"{title}\" never appeared");
+    }
+
+    public static nint OpenTrayMenu(Process app)
+    {
+        foreach (var h in W.WindowsOf(app.Id)) W.PostMessage(h, 0x0400 + 1024, 0, 0x0205);
+        for (var i = 0; i < 50; i++)
+        {
+            var menu = W.WindowsOf(app.Id).FirstOrDefault(W.IsVisible);
+            if (menu != 0) { Thread.Sleep(600); return menu; }
+            Thread.Sleep(100);
+        }
+        throw new Exception("tray menu never appeared");
+    }
+
+    public static void CloseWindow(nint h) => W.PostMessage(h, 0x0010, 0, 0); // WM_CLOSE
+
+    // A topmost menu's own rect, from the screen: nothing but the menu's pixels.
+    public static Bitmap FromScreen(nint h)
+    {
+        var o = W.Describe(h).Outer;
+        var bmp = new Bitmap(o.Width, o.Height);
+        using var g = Graphics.FromImage(bmp);
+        g.CopyFromScreen(o.X, o.Y, 0, 0, new Size(o.Width, o.Height));
+        return bmp;
+    }
+
+    public static void SaveCaptioned(string path, Bitmap window, string caption)
+    {
+        using var font = new Font("Segoe UI", 11, FontStyle.Bold);
+        const int pad = 16, top = 40;
+        var width = Math.Max(window.Width + 2 * pad, 760);
+        using var canvas = new Bitmap(width, window.Height + top + pad);
+        using var g = Graphics.FromImage(canvas);
+        g.Clear(Color.FromArgb(28, 28, 30));
+        g.DrawString(caption, font, Brushes.White, pad, 10);
+        g.DrawImage(window, pad, top, window.Width, window.Height);
+        canvas.Save(path, ImageFormat.Png);
+        window.Dispose();
+        Console.WriteLine($"saved {path}");
     }
 }
