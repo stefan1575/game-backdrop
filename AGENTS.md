@@ -26,7 +26,8 @@ Checking the real Win32 path by hand: `tools/TestWindow` is a stand-in game (key
 F borderless fullscreen, R next size; or `--mode fullscreen`, `--size 1280x720`). List its exe
 in a settings file and start the app with `--settings <path>` to leave the real
 `%APPDATA%\GameBackdrop\settings.json` alone; such a run also keeps its Start at logon shortcut in
-a `Startup` folder beside that settings file, never in the real Startup folder.
+a `Startup` folder beside that settings file, never in the real Startup folder, and its Always
+run as administrator task under its own name (`ScheduledTask.NameFor`), never the real one.
 
 A game running as administrator can be stood in for without a UAC prompt: run a copy of the
 app at Low integrity (`icacls <copy>\GameBackdrop.exe /setintegritylevel low`, then start it)
