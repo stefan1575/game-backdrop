@@ -1,0 +1,74 @@
+[
+  {
+    "name": "1-game-goes-fullscreen",
+    "scene": "1. Restyled game switches itself to borderless fullscreen (F): black backdrop covers the monitor",
+    "style": "0x94000000",
+    "ex": "0x00000000",
+    "outer": "(0,0) 2560x1440",
+    "client": "(0,0) 2560x1440"
+  },
+  {
+    "name": "2-game-goes-windowed-again",
+    "scene": "2. Then back to windowed (W): black backdrop covers the monitor",
+    "style": "0x14CF0000",
+    "ex": "0x00000100",
+    "outer": "(100,100) 816x639",
+    "client": "(108,131) 800x600"
+  },
+  {
+    "name": "3-game-changes-resolution",
+    "scene": "3. Then a resolution change to 1280x720 (R): black backdrop covers the monitor",
+    "style": "0x14CF0000",
+    "ex": "0x00000100",
+    "outer": "(100,100) 1296x759",
+    "client": "(108,131) 1280x720"
+  },
+  {
+    "name": "4-after-quit",
+    "scene": "4. App quit from its tray menu",
+    "style": "0x14CF0000",
+    "ex": "0x00000100",
+    "outer": "(100,100) 816x639",
+    "client": "(108,131) 800x600"
+  },
+  {
+    "name": "5-maximised-frameless-before-app",
+    "scene": "5. Frameless maximised game covering the work area, app not running",
+    "style": "0x95000000",
+    "ex": "0x00000000",
+    "outer": "(0,0) 2560x1392",
+    "client": "(0,0) 2560x1392"
+  },
+  {
+    "name": "6-maximised-game-fills-monitor",
+    "scene": "6. App stripped it (WS_MAXIMIZE off); it went topmost and filled the monitor itself: black backdrop covers the monitor",
+    "style": "0x94000000",
+    "ex": "0x00000008",
+    "outer": "(0,0) 2560x1440",
+    "client": "(0,0) 2560x1440"
+  },
+  {
+    "name": "7-maximised-after-quit",
+    "scene": "7. App quit from its tray menu",
+    "style": "0x95000000",
+    "ex": "0x00000008",
+    "outer": "(0,0) 2560x1392",
+    "client": "(0,0) 2560x1392"
+  },
+  {
+    "name": "8-disabled-game-after-quit",
+    "scene": "8. Game disabled (as under a modal dialog) when the app quit: title bar back; is it still disabled?",
+    "style": "0x14CF0000",
+    "ex": "0x00000100",
+    "outer": "(100,100) 816x639",
+    "client": "(108,131) 800x600"
+  },
+  {
+    "name": "9-fullscreen-left-alone",
+    "scene": "9. Borderless-fullscreen game opened while the app runs: no backdrop",
+    "style": "0x94000000",
+    "ex": "0x00000000",
+    "outer": "(0,0) 2560x1440",
+    "client": "(0,0) 2560x1440"
+  }
+]
