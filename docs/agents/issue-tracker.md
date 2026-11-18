@@ -16,8 +16,7 @@ Infer the repo from `git remote -v`; `gh` does this automatically when run insid
 
 ## Pull requests as a triage surface
 
-PRs are not a feature-request surface; feature requests are issues. PR review goes through the
-queue runner linked in `AGENTS.md`.
+PRs are not a feature-request surface; feature requests are issues.
 
 GitHub shares one number space across issues and PRs, so a bare `#42` may be either: resolve with `gh pr view 42` and fall back to `gh issue view 42`.
 

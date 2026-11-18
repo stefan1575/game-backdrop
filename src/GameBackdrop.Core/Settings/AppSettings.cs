@@ -9,7 +9,7 @@ public sealed class AppSettings
     /// <summary>
     /// The hotkey that toggles the backdrop for the game in front, written as
     /// <see cref="Settings.Hotkey.TryParse"/> reads it. Null means the default, Ctrl+Alt+B; it is
-    /// kept as written, so a save never rewrites what Stefan typed.
+    /// kept as written, so a save never rewrites what the user typed.
     /// </summary>
     [JsonPropertyName("hotkey")]
     public string? Hotkey { get; set; }
