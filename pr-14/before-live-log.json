@@ -31,11 +31,25 @@
     "backdropDirectlyBehindGame": true,
     "foreground": "game",
     "taskbar": "below the backdrop",
-    "blackShareOutsideGame": "n/a (empty area)",
-    "name": "1-game-goes-fullscreen-monitor",
+    "name": "1-game-goes-fullscreen-screen",
     "scene": "1. Restyled game switches itself to borderless fullscreen (F): black backdrop covers the monitor",
     "activatedByHarness": "no (already foreground)",
-    "picture": "1-game-goes-fullscreen-monitor.png: the backdrop\u0027s and the game\u0027s own pixels (PrintWindow) at their real rects and Z order"
+    "blackShareTaskbarStrip": "0.00% of 122880 px",
+    "blackShareOutsideGame": "n/a (empty area)",
+    "blackShareOutsideGameArea": "monitor minus the game\u0027s outer rect",
+    "picture": "1-game-goes-fullscreen-screen.png: screen capture (CopyFromScreen) while the backdrop covers the monitor; 1 other window(s) masked",
+    "maskedOtherWindows": [
+      {
+        "cls": "Tauri Window",
+        "process": "handy",
+        "rect": "(1152,1350) 256x50",
+        "ex": "0x08040118",
+        "topmost": true,
+        "layered": false,
+        "transparent": false,
+        "belowGame": false
+      }
+    ]
   },
   {
     "name": "2-game-goes-windowed-again",
@@ -68,12 +82,26 @@
     "firstVisibleBelowGameInfo": null,
     "backdropDirectlyBehindGame": true,
     "foreground": "game",
-    "taskbar": "below the backdrop",
-    "blackShareOutsideGame": "100.00% of 3164976 px",
-    "name": "2-game-goes-windowed-again-monitor",
+    "taskbar": "above the backdrop",
+    "name": "2-game-goes-windowed-again-screen",
     "scene": "2. Then back to windowed (W): black backdrop covers the monitor",
     "activatedByHarness": "no (already foreground)",
-    "picture": "2-game-goes-windowed-again-monitor.png: the backdrop\u0027s and the game\u0027s own pixels (PrintWindow) at their real rects and Z order"
+    "blackShareTaskbarStrip": "0.16% of 122880 px",
+    "blackShareOutsideGame": "95.94% of 3164976 px",
+    "blackShareOutsideGameArea": "monitor minus the game\u0027s outer rect",
+    "picture": "2-game-goes-windowed-again-screen.png: screen capture (CopyFromScreen) while the backdrop covers the monitor; taskbar strip masked; 1 other window(s) masked",
+    "maskedOtherWindows": [
+      {
+        "cls": "Tauri Window",
+        "process": "handy",
+        "rect": "(1152,1350) 256x50",
+        "ex": "0x08040118",
+        "topmost": true,
+        "layered": false,
+        "transparent": false,
+        "belowGame": false
+      }
+    ]
   },
   {
     "name": "3-game-changes-resolution",
@@ -106,12 +134,26 @@
     "firstVisibleBelowGameInfo": null,
     "backdropDirectlyBehindGame": true,
     "foreground": "game",
-    "taskbar": "below the backdrop",
-    "blackShareOutsideGame": "100.00% of 2702736 px",
-    "name": "3-game-changes-resolution-monitor",
+    "taskbar": "above the backdrop",
+    "name": "3-game-changes-resolution-screen",
     "scene": "3. Then a resolution change to 1280x720 (R): black backdrop covers the monitor",
     "activatedByHarness": "no (already foreground)",
-    "picture": "3-game-changes-resolution-monitor.png: the backdrop\u0027s and the game\u0027s own pixels (PrintWindow) at their real rects and Z order"
+    "blackShareTaskbarStrip": "0.16% of 122880 px",
+    "blackShareOutsideGame": "95.25% of 2702736 px",
+    "blackShareOutsideGameArea": "monitor minus the game\u0027s outer rect",
+    "picture": "3-game-changes-resolution-screen.png: screen capture (CopyFromScreen) while the backdrop covers the monitor; taskbar strip masked; 1 other window(s) masked",
+    "maskedOtherWindows": [
+      {
+        "cls": "Tauri Window",
+        "process": "handy",
+        "rect": "(1152,1350) 256x50",
+        "ex": "0x08040118",
+        "topmost": true,
+        "layered": false,
+        "transparent": false,
+        "belowGame": false
+      }
+    ]
   },
   {
     "name": "4-after-quit",
@@ -156,25 +198,19 @@
         "topmost": false
       }
     ],
-    "firstVisibleBelowGame": "other window (class Avalonia-f8316e11-3aba-4021-9eb3-8dbb3772eb25)",
-    "firstVisibleBelowGameInfo": {
-      "cls": "Avalonia-f8316e11-3aba-4021-9eb3-8dbb3772eb25",
-      "process": "ShareX",
-      "rect": "(0,0) 2560x1440",
-      "ex": "0x00200008",
-      "topmost": true,
-      "layered": false,
-      "transparent": false,
-      "belowGame": true
-    },
-    "backdropDirectlyBehindGame": false,
+    "firstVisibleBelowGame": "backdrop",
+    "firstVisibleBelowGameInfo": null,
+    "backdropDirectlyBehindGame": true,
     "foreground": "game",
     "taskbar": "below the backdrop",
-    "blackShareOutsideGame": "n/a (empty area)",
-    "name": "6-maximised-game-fills-monitor-monitor",
+    "name": "6-maximised-game-fills-monitor-screen",
     "scene": "6. App stripped it (WS_MAXIMIZE off); it went topmost and filled the monitor itself: black backdrop covers the monitor",
     "activatedByHarness": "no (already foreground)",
-    "picture": "6-maximised-game-fills-monitor-monitor.png: the backdrop\u0027s and the game\u0027s own pixels (PrintWindow) at their real rects and Z order"
+    "blackShareTaskbarStrip": "0.00% of 122880 px",
+    "blackShareOutsideGame": "n/a (empty area)",
+    "blackShareOutsideGameArea": "monitor minus the game\u0027s outer rect",
+    "picture": "6-maximised-game-fills-monitor-screen.png: screen capture (CopyFromScreen) while the backdrop covers the monitor",
+    "maskedOtherWindows": []
   },
   {
     "name": "7-maximised-after-quit",
@@ -222,13 +258,16 @@
     "firstVisibleBelowGame": "backdrop",
     "firstVisibleBelowGameInfo": null,
     "backdropDirectlyBehindGame": true,
-    "foreground": "other window (class Avalonia-f8316e11-3aba-4021-9eb3-8dbb3772eb25)",
+    "foreground": "game",
     "taskbar": "below the backdrop",
-    "blackShareOutsideGame": "100.00% of 3203596 px",
-    "name": "11-resize-border-stripped-monitor",
+    "name": "11-resize-border-stripped-screen",
     "scene": "11. App started: resize border stripped, centred: black backdrop covers the monitor",
-    "activatedByHarness": "FAILED to activate",
-    "picture": "11-resize-border-stripped-monitor.png: the backdrop\u0027s and the game\u0027s own pixels (PrintWindow) at their real rects and Z order"
+    "activatedByHarness": "no (already foreground)",
+    "blackShareTaskbarStrip": "100.00% of 122880 px",
+    "blackShareOutsideGame": "100.00% of 3203596 px",
+    "blackShareOutsideGameArea": "monitor minus the game\u0027s outer rect",
+    "picture": "11-resize-border-stripped-screen.png: screen capture (CopyFromScreen) while the backdrop covers the monitor",
+    "maskedOtherWindows": []
   },
   {
     "name": "12-resize-border-game-fills-monitor",
@@ -260,13 +299,16 @@
     "firstVisibleBelowGame": "backdrop",
     "firstVisibleBelowGameInfo": null,
     "backdropDirectlyBehindGame": true,
-    "foreground": "other window (class Avalonia-f8316e11-3aba-4021-9eb3-8dbb3772eb25)",
+    "foreground": "game",
     "taskbar": "below the backdrop",
-    "blackShareOutsideGame": "n/a (empty area)",
-    "name": "12-resize-border-game-fills-monitor-monitor",
+    "name": "12-resize-border-game-fills-monitor-screen",
     "scene": "12. The game filled its monitor itself, still stripped (WS_THICKFRAME 0x00040000 back?): black backdrop covers the monitor",
-    "activatedByHarness": "FAILED to activate",
-    "picture": "12-resize-border-game-fills-monitor-monitor.png: the backdrop\u0027s and the game\u0027s own pixels (PrintWindow) at their real rects and Z order"
+    "activatedByHarness": "no (already foreground)",
+    "blackShareTaskbarStrip": "0.00% of 122880 px",
+    "blackShareOutsideGame": "n/a (empty area)",
+    "blackShareOutsideGameArea": "monitor minus the game\u0027s outer rect",
+    "picture": "12-resize-border-game-fills-monitor-screen.png: screen capture (CopyFromScreen) while the backdrop covers the monitor",
+    "maskedOtherWindows": []
   },
   {
     "name": "13-resize-border-after-quit",
