@@ -8,8 +8,8 @@ namespace GameBackdrop.Core.Tests;
 
 /// <summary>
 /// Whatever the app changed on a game is put back on quit, however the game changed its own style
-/// meanwhile and whichever restyle or put-back Windows refused along the way (Sol's reviews 2 and 3
-/// of PR #14: F4 to F8, and the other ways into the same class). Only what the app changed goes
+/// meanwhile and whichever restyle or put-back Windows refused along the way (reviews 2 and 3 of
+/// PR #14: F4 to F8, and the other ways into the same class). Only what the app changed goes
 /// back: bits the game set itself meanwhile (WS_EX_TOPMOST, WS_DISABLED) stay.
 /// </summary>
 public sealed class ReviewRegressionTests
@@ -228,7 +228,7 @@ public sealed class ReviewRegressionTests
         AssertFrame(game, new WindowFrame(ThickPopup, ownFullscreen));
     }
 
-    // --- Sol's review 3 (F7, F8): what the app owes is what it took off, nothing older or narrower ---
+    // --- Review 3 (F7, F8): what the app owes is what it took off, nothing older or narrower ---
 
     [Fact]
     public void A_game_that_picks_a_frameless_window_after_its_resize_border_was_put_back_does_not_get_that_border_again()
@@ -342,7 +342,7 @@ public sealed class ReviewRegressionTests
     [Fact]
     public void A_game_that_sets_its_own_popup_style_still_keeps_it_and_quitting_leaves_it()
     {
-        // Stefan's decision (2026-11-16, option A) stands: a new frame of the game's own is the
+        // The decision (2026-11-16, option A) stands: a new frame of the game's own is the
         // game's, and nothing of the app's is left in it.
         var controller = StartController();
         var game = OpenGame();

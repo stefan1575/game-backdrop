@@ -85,7 +85,7 @@ internal sealed class TrayApplication : ApplicationContext
 
     /// <summary>
     /// Stop the controller and put every game back. A restore that fails is retried a few times;
-    /// any game still not put back is named to Stefan once, rather than forgotten silently. The
+    /// any game still not put back is named to the user once, rather than forgotten silently. The
     /// controller is stopped (no longer handling window events) before any dialog opens, so the
     /// dialog's message loop can't restyle a game again.
     /// </summary>
