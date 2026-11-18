@@ -458,6 +458,33 @@ try
         Quit(app);
     }
     else if (scenario == "fgprobe2") FgProbe2(3);
+    else if (scenario == "fsprobe")
+    {
+        // A fullscreen game opened while the app runs, five times: every distinct state of its
+        // window over 4 s (style, rect), and whether the app gave it a backdrop.
+        for (var round = 1; round <= 5; round++)
+        {
+            var app = Launch(appExe, $"--settings \"{settingsPath}\"");
+            Thread.Sleep(1500);
+            var proc = Launch(testExe, "--mode fullscreen");
+            var sw = Stopwatch.StartNew();
+            nint h = 0;
+            while (h == 0 && sw.ElapsedMilliseconds < 5000) { h = W.TestWindowOf(proc.Id); Thread.Sleep(5); }
+            string last = "";
+            var states = new List<string>();
+            while (sw.ElapsedMilliseconds < 4000)
+            {
+                var d = W.Describe(h);
+                var now = $"style 0x{d.Style:X8} outer {d.Outer} client {d.Client}";
+                if (now != last) { states.Add($"{sw.ElapsedMilliseconds} ms: {now}"); last = now; }
+                Thread.Sleep(5);
+            }
+            var r = new Dictionary<string, object?> { ["name"] = "fsprobe", ["round"] = round, ["states"] = states, ["backdrops"] = W.Backdrops(app.Id).Count(W.IsVisible) };
+            log.Add(r); Console.WriteLine(JsonSerializer.Serialize(r));
+            Quit(app);
+            proc.Kill(); proc.WaitForExit(); Thread.Sleep(500);
+        }
+    }
     else if (scenario == "live")
     {
         // PR #14 (#4): a game changing its own window while the app runs. Run once on main (before)
@@ -469,6 +496,55 @@ try
         // 1-4. A windowed game goes fullscreen, windowed again, changes resolution; then Quit.
         // Each part closes its test window, so the next app run sees only its own game.
         void Close(Process p) { p.Kill(); p.WaitForExit(); Thread.Sleep(600); }
+        // Where a backdrop covers the monitor, also the monitor itself (CopyFromScreen, with the
+        // game in front so its fullscreen mark drops the taskbar behind the black); see ScreenShot.
+        void Both(string name, string scene, nint game, int pid)
+        {
+            Shot(name, scene, game);
+            if (Backdrop(pid) != "no backdrop") Monitor(name + "-monitor", scene, game, pid, W.EnsureForeground(game));
+        }
+        // The monitor as the two windows make it up: the backdrop's own pixels over its rect, then
+        // the game's over its rect, each from PrintWindow, in their real Z order. Built from the
+        // windows, not the screen, so another program's window above them (a topmost ShareX
+        // overlay on this PC) is neither captured nor in the way. The taskbar's strip shows where
+        // it is, drawn (not captured) as above or below the black from the measured Z order.
+        void Monitor(string name, string scene, nint game, int pid, string activated)
+        {
+            var m = Measure(game, pid, 0);
+            var mon = screen.Bounds; var work = screen.WorkingArea;
+            var bd = W.Backdrops(pid).First(b => W.IsVisible(b));
+            var bo = W.Describe(bd).Outer; var go = W.Describe(game).Outer;
+            using var canvas = new Bitmap(mon.Width, mon.Height, PixelFormat.Format32bppArgb);
+            using (var g = Graphics.FromImage(canvas))
+            {
+                g.Clear(Color.FromArgb(28, 28, 30));
+                var gameAbove = W.ZIndex(game) < W.ZIndex(bd);
+                using (var bp = W.Print(bd, bo)) g.DrawImage(bp, bo.X - mon.Left, bo.Y - mon.Top);
+                if (gameAbove) using (var gp = W.Print(game, go)) g.DrawImage(gp, go.X - mon.Left, go.Y - mon.Top);
+                m["blackShareOutsideGame"] = W.BlackShare(canvas, (x, y) => !new Rectangle(go.X - mon.Left, go.Y - mon.Top, go.Width, go.Height).Contains(x, y));
+                var strip = new Rectangle(0, work.Bottom - mon.Top, mon.Width, mon.Bottom - work.Bottom);
+                var taskbarAbove = W.ZIndex(W.FindTray()) < W.ZIndex(bd);
+                using var font = new Font("Segoe UI", 20, FontStyle.Bold);
+                using var small = new Font("Consolas", 15);
+                if (taskbarAbove && strip.Height > 0)
+                {
+                    using var tb = new SolidBrush(Color.FromArgb(70, 70, 76));
+                    g.FillRectangle(tb, strip);
+                    g.DrawString("taskbar ABOVE the black (drawn, not captured)", small, Brushes.White, 20, strip.Top + 8);
+                }
+                else if (strip.Height > 0)
+                    g.DrawString("taskbar strip: the taskbar is BELOW the black here (measured Z order), so this is the backdrop's black", small, Brushes.DimGray, 20, strip.Top + 8);
+                var y0 = go.Y - mon.Top > 160 ? 24 : Math.Min(go.Y - mon.Top + go.Height + 30, work.Bottom - mon.Top - 110);
+                g.DrawString(scene, font, Brushes.Gray, 30, y0);
+                g.DrawString("The backdrop's and the game's own pixels (PrintWindow) at their real rects and Z order; nothing else on the screen is captured.", small, Brushes.DimGray, 30, y0 + 40);
+                g.DrawString($"backdrop {bo}   game {go}   pure black outside the game: {m["blackShareOutsideGame"]}   taskbar {(taskbarAbove ? "above" : "below")} the black   foreground: {m["foreground"]}", small, Brushes.DimGray, 30, y0 + 66);
+            }
+            m["name"] = name; m["scene"] = scene; m["activatedByHarness"] = activated;
+            m["picture"] = $"{name}.png: the backdrop's and the game's own pixels (PrintWindow) at their real rects and Z order";
+            canvas.Save(Path.Combine(outDir, name + ".png"), ImageFormat.Png);
+            log.Add(m);
+            Console.WriteLine($"{name}: black outside game {m["blackShareOutsideGame"]}, taskbar {m["taskbar"]}, below game {m["firstVisibleBelowGame"]}");
+        }
         var aProc = Launch(testExe, "--size 800x600");
         var a = WaitWindow(aProc);
         var sa = W.Describe(a).Style;
@@ -476,11 +552,11 @@ try
         WaitChanged(a, sa);
         WaitBackdrop(app.Id);
         Key(a, 'F');
-        Shot("1-game-goes-fullscreen", $"1. Restyled game switches itself to borderless fullscreen (F): {Backdrop(app.Id)}", a);
+        Both("1-game-goes-fullscreen", $"1. Restyled game switches itself to borderless fullscreen (F): {Backdrop(app.Id)}", a, app.Id);
         Key(a, 'W');
-        Shot("2-game-goes-windowed-again", $"2. Then back to windowed (W): {Backdrop(app.Id)}", a);
+        Both("2-game-goes-windowed-again", $"2. Then back to windowed (W): {Backdrop(app.Id)}", a, app.Id);
         Key(a, 'R');
-        Shot("3-game-changes-resolution", $"3. Then a resolution change to 1280x720 (R): {Backdrop(app.Id)}", a);
+        Both("3-game-changes-resolution", $"3. Then a resolution change to 1280x720 (R): {Backdrop(app.Id)}", a, app.Id);
         Quit(app);
         Shot("4-after-quit", "4. App quit from its tray menu", a);
         Close(aProc);
@@ -501,11 +577,30 @@ try
         var mon = screen.Bounds;
         W.SetRect(b, mon.X, mon.Y, mon.Width, mon.Height);
         Thread.Sleep(1500);
-        Shot("6-maximised-game-fills-monitor", $"6. App stripped it (WS_MAXIMIZE off); it went topmost and filled the monitor itself: {Backdrop(app2.Id)}", b);
+        Both("6-maximised-game-fills-monitor", $"6. App stripped it (WS_MAXIMIZE off); it went topmost and filled the monitor itself: {Backdrop(app2.Id)}", b, app2.Id);
         Quit(app2);
         Shot("7-maximised-after-quit", "7. App quit from its tray menu", b);
         W.SetTopmost(b, false);
         Close(bProc);
+
+        // 10-12. A frameless game with a resize border, stripped, fills its monitor itself: its border goes back.
+        var tProc = Launch(testExe, "--size 800x600");
+        var t = WaitWindow(tProc);
+        W.SetStyle(t, 0x80000000 | 0x10000000 | 0x00040000); // WS_POPUP | WS_VISIBLE | WS_THICKFRAME
+        W.SetRect(t, 100, 100, 816, 616);
+        Thread.Sleep(600);
+        Shot("10-resize-border-before-app", "10. Frameless game with a resize border, app not running", t);
+        var st = W.Describe(t).Style;
+        var app5 = Launch(appExe, $"--settings \"{settingsPath}\"");
+        WaitChanged(t, st);
+        WaitBackdrop(app5.Id);
+        Both("11-resize-border-stripped", $"11. App started: resize border stripped, centred: {Backdrop(app5.Id)}", t, app5.Id);
+        W.SetRect(t, mon.X, mon.Y, mon.Width, mon.Height);
+        Thread.Sleep(1500);
+        Both("12-resize-border-game-fills-monitor", $"12. The game filled its monitor itself, still stripped (WS_THICKFRAME 0x00040000 back?): {Backdrop(app5.Id)}", t, app5.Id);
+        Quit(app5);
+        Shot("13-resize-border-after-quit", "13. App quit from its tray menu", t);
+        Close(tProc);
 
         // 8. A game a modal dialog disabled while the app ran, at Quit.
         var cProc = Launch(testExe, "--size 800x600");
