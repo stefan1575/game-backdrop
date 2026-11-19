@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using GameBackdrop.Core.Startup;
 
 namespace GameBackdrop.Windows.Tests;
 
@@ -124,6 +125,54 @@ public sealed class SingleInstanceTests
         }
     }
 
+    [Fact]
+    public void An_uninstall_asks_the_running_copy_to_quit_and_then_takes_its_place()
+    {
+        using var quitAsked = new ManualResetEventSlim();
+        using var running = new HeldElsewhere(_name, onQuit: quitAsked.Set);
+
+        Assert.Equal(QuitRequest.Asked, SingleInstance.AskToQuit(_name));
+        Assert.True(quitAsked.Wait(TimeSpan.FromSeconds(5)), "the running copy wasn't asked to quit");
+
+        running.Release();
+        using var gone = new RunningCopy(TimeSpan.FromSeconds(5), _name, _event).WaitUntilGone();
+        Assert.NotNull(gone);
+    }
+
+    [Fact]
+    public void With_no_copy_running_there_is_none_to_ask()
+    {
+        Assert.Equal(QuitRequest.NoneRunning, SingleInstance.AskToQuit(_name));
+        using var gone = new RunningCopy(TimeSpan.Zero, _name, _event).WaitUntilGone();
+        Assert.NotNull(gone);
+    }
+
+    [Fact]
+    public void A_quit_event_this_user_may_not_open_needs_administrator()
+    {
+        var locked = CreateLockedEvent(SingleInstance.QuitEventNameFor(_name));
+        try
+        {
+            Assert.Equal(QuitRequest.NeedsAdministrator, SingleInstance.AskToQuit(_name));
+        }
+        finally
+        {
+            CloseHandle(locked);
+        }
+    }
+
+    [Fact]
+    public void A_second_launch_does_not_ask_the_running_copy_to_quit()
+    {
+        using var running = SingleInstance.Claim(_name, _event, TimeSpan.Zero)!;
+        using var quitAsked = new ManualResetEventSlim();
+        using var listening = running.OnQuitRequest(new SynchronizationContext(), quitAsked.Set);
+
+        Assert.Null(OnOwnThread(() => SingleInstance.Claim(_name, _event, TimeSpan.Zero)));
+
+        Assert.False(quitAsked.Wait(TimeSpan.FromMilliseconds(500)), "a second launch asked the running copy to quit");
+    }
+
     private static T OnOwnThread<T>(Func<T> work)
     {
         T result = default!;
@@ -139,11 +188,12 @@ public sealed class SingleInstanceTests
         private readonly ManualResetEventSlim _acquired = new(), _release = new();
         private readonly Thread _thread;
 
-        public HeldElsewhere(string name)
+        public HeldElsewhere(string name, Action? onQuit = null)
         {
             _thread = new Thread(() =>
             {
                 using var guard = SingleInstance.Claim(name, name + ".OpenList", TimeSpan.Zero) ?? throw new InvalidOperationException("Not acquired.");
+                using var listening = onQuit is null ? null : guard.OnQuitRequest(new SynchronizationContext(), onQuit);
                 _acquired.Set();
                 _release.Wait();
             });
