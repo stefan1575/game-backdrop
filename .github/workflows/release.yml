@@ -37,18 +37,25 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
-        # A rerun after a later step failed replaces the exe on the release made the first time.
+        # A rerun never replaces an exe already on the release (an upload that fails after
+        # --clobber deleted it would leave the manifest pointing at nothing): it uses that exe, so
+        # the manifest's hash is the published file's. A draft left by a cancelled run is published.
         run: |
-          gh release view ${{ github.ref_name }} *> $null
-          if ($LASTEXITCODE -eq 0) {
-            gh release upload ${{ github.ref_name }} publish/GameBackdrop.exe --clobber
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-            # A run cancelled mid-upload can leave gh's draft behind; a draft's download URL is a 404.
-            gh release edit ${{ github.ref_name }} --draft=false
+          $tag = '${{ github.ref_name }}'
+          $json = gh release view $tag --json isDraft,assets 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag publish/GameBackdrop.exe --title "Game Backdrop ${{ steps.version.outputs.version }}" --generate-notes
+            exit $LASTEXITCODE
+          }
+          $release = $json | ConvertFrom-Json
+          if ($release.assets.name -contains 'GameBackdrop.exe') {
+            gh release download $tag --pattern GameBackdrop.exe --dir publish --clobber
           } else {
-            gh release create ${{ github.ref_name }} publish/GameBackdrop.exe --title "Game Backdrop ${{ steps.version.outputs.version }}" --generate-notes
+            gh release upload $tag publish/GameBackdrop.exe
           }
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($release.isDraft) { gh release edit $tag --draft=false }
+          exit $LASTEXITCODE
       - name: Point the Scoop manifest at the release
         shell: pwsh
         run: |
