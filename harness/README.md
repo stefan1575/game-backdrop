@@ -64,3 +64,8 @@ and black. Say which way each picture was made.
   manifest, the Start menu shortcut's own name and icon (`Icon.ExtractAssociatedIcon` on the
   `.lnk`), drawn rather than captured, since the Start menu shows other programs. Neither has a
   `before`: main has no `--uninstall` and no Scoop package.
+- `pr-34/before-tray-icon.png`, `after-tray-icon.png` (#33): `harness/pr-34/tray-icon.ps1 -Exe
+  <published exe>` starts the app with a scratch `--settings` file, promotes only that exe's own
+  `HKCU\Control Panel\NotifyIconSettings` entry (Windows 11 puts a new icon in the overflow),
+  asks the shell for the icon's rect (`Shell_NotifyIconGetRect`, uID 1), copies just that rect
+  from the screen, then stops the app and deletes the entry. Run on main's exe and the PR's.
