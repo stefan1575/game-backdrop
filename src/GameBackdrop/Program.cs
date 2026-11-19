@@ -57,7 +57,7 @@ internal static class Program
         var scheduledTask = new ScheduledTask(ScheduledTask.Folder, ScheduledTask.NameFor(customSettings), exe, TaskArguments(customSettings));
         var shortcut = StartupShortcutFor(exe, customSettings);
         if (args.Contains(UninstallFlag))
-            return Uninstall(new Uninstall(new RunningCopy(TakeoverWait), shortcut, scheduledTask), exe, args);
+            return Uninstall(new Uninstall(new RunningCopy(TakeoverWait), shortcut, scheduledTask), exe, customSettings);
 
         var task = new AdministratorTask(scheduledTask, exe);
         var startAtLogon = new StartAtLogon(store, shortcut, task);
@@ -93,7 +93,7 @@ internal static class Program
     /// <c>--uninstall</c>: tidy up, as administrator if the task or the running copy needs that (an
     /// elevated copy of this run, so one UAC prompt). Silent when it's done.
     /// </summary>
-    private static int Uninstall(Uninstall uninstall, string exe, string[] args)
+    private static int Uninstall(Uninstall uninstall, string exe, string? customSettings)
     {
         UninstallResult result;
         try
@@ -113,7 +113,13 @@ internal static class Program
         }
 
         var start = new ProcessStartInfo(exe) { UseShellExecute = true, Verb = "runas" };
-        foreach (var arg in args) start.ArgumentList.Add(arg);
+        start.ArgumentList.Add(UninstallFlag);
+        // The full path: the elevated copy may start in another folder.
+        if (customSettings is not null)
+        {
+            start.ArgumentList.Add("--settings");
+            start.ArgumentList.Add(customSettings);
+        }
         try
         {
             using var elevated = Process.Start(start)!;
