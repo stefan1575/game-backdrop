@@ -8,20 +8,27 @@ nothing is injected into the game.
 
 ## Install
 
-1. Get `GameBackdrop.exe`: publish it yourself (below), or download the `GameBackdrop`
-   artifact from the newest CI run on `main`:
+With [Scoop](https://scoop.sh):
 
-   ```
-   gh run list --repo stefan1575/game-backdrop --branch main --event push --status success --limit 1 --json databaseId --jq ".[0].databaseId"
-   gh run download <that id> --repo stefan1575/game-backdrop --name GameBackdrop
-   ```
+```
+scoop bucket add game-backdrop https://github.com/stefan1575/game-backdrop
+scoop install game-backdrop
+```
 
-2. Put it somewhere it will stay, e.g. `%LOCALAPPDATA%\Programs\GameBackdrop\GameBackdrop.exe`.
-   It's one self-contained file: no .NET runtime needs installing.
-3. Run it once. It sits in the tray and, on this first run, ticks **Start at logon**: a
-   `Game Backdrop.lnk` shortcut in your Startup folder (`shell:startup`) starts it each time
-   you sign in. Untick it in the tray menu to stop that; the choice is kept in the settings
-   file, so it stays off.
+That adds **Game Backdrop** to the Start menu. `scoop update game-backdrop` gets a new release;
+quit the app from its tray first, as Scoop won't replace a running exe.
+
+Or download `GameBackdrop.exe` from the newest
+[release](https://github.com/stefan1575/game-backdrop/releases/latest) and put it somewhere it
+will stay, e.g. `%LOCALAPPDATA%\Programs\GameBackdrop\`. It's one self-contained file: no .NET
+runtime needs installing. The exe isn't code-signed, so the first time you run a downloaded copy
+Windows shows **Windows protected your PC**: click **More info**, then **Run anyway**. (Scoop
+doesn't trigger that: it downloads outside the browser.)
+
+Run it once. It sits in the tray and, on this first run, ticks **Start at logon**: a
+`Game Backdrop.lnk` shortcut in your Startup folder (`shell:startup`) starts it each time you
+sign in. Untick it in the tray menu to stop that; the choice is kept in the settings file, so it
+stays off.
 
 If you move the exe, run it once from its new place: with Start at logon on, the shortcut is
 rewritten to point at the exe that's running.
@@ -45,8 +52,16 @@ The game list lives in `%APPDATA%\GameBackdrop\settings.json`:
 }
 ```
 
-To uninstall: untick **Always run as administrator** and **Start at logon**, quit from the tray, then delete the exe and
-`%APPDATA%\GameBackdrop`.
+## Uninstall
+
+With Scoop: `scoop uninstall game-backdrop`.
+
+A copy you downloaded: run `GameBackdrop.exe --uninstall`, then delete the exe.
+
+Either way, `--uninstall` (Scoop runs it for you) quits a running copy, which puts every game
+back, and removes the Start at logon shortcut and the Always run as administrator task. With the
+task set up, or the app running as administrator, it asks for administrator once. Your game list
+stays in `%APPDATA%\GameBackdrop`; delete that folder to remove it too.
 
 ## Build, test and publish
 
@@ -62,6 +77,11 @@ The publish leaves one exe, self-contained for win-x64, at
 `src/GameBackdrop/bin/Release/net10.0-windows/win-x64/publish/GameBackdrop.exe`. CI builds,
 tests and publishes on every push and PR, and keeps the exe as the `GameBackdrop` artifact on
 pushes to `main`.
+
+Pushing a version tag (`git tag v0.1.0`, `git push origin v0.1.0`) makes a release: the
+`Release` workflow builds and tests that version, attaches the exe to a GitHub Release, and
+points the Scoop manifest (`bucket/game-backdrop.json`) on `main` at it, through
+`tools/update-scoop-manifest.ps1`.
 
 `GameBackdrop.exe --settings <path>` runs against another settings file and keeps its Start at
 logon shortcut in a `Startup` folder beside that file, and its Always run as administrator task

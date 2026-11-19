@@ -1,0 +1,34 @@
+{
+    "version": "0.0.0",
+    "description": "Blacks out the rest of the monitor around a windowed game, and strips its title bar and border.",
+    "homepage": "https://github.com/stefan1575/game-backdrop",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/stefan1575/game-backdrop/releases/download/v0.0.0/GameBackdrop.exe",
+            "hash": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+    },
+    "bin": "GameBackdrop.exe",
+    "shortcuts": [
+        [
+            "GameBackdrop.exe",
+            "Game Backdrop"
+        ]
+    ],
+    "pre_uninstall": [
+        "if ($cmd -eq 'uninstall') {",
+        "    $tidy = Start-Process \"$dir\\GameBackdrop.exe\" -ArgumentList '--uninstall' -Wait -PassThru",
+        "    if ($tidy.ExitCode -ne 0) { throw 'Game Backdrop could not remove its Start at logon shortcut or task, so it was not uninstalled.' }",
+        "    Get-Process GameBackdrop -ErrorAction SilentlyContinue | Where-Object { $_.Path -like \"$(Split-Path $dir)\\*\" } | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue",
+        "}"
+    ],
+    "notes": "Your game list stays in %APPDATA%\\GameBackdrop after an uninstall; delete that folder to remove it too.",
+    "checkver": "github",
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/stefan1575/game-backdrop/releases/download/v$version/GameBackdrop.exe"
+            }
+        }
+    }
+}
