@@ -4,8 +4,9 @@ namespace GameBackdrop.Windows;
 
 /// <summary>
 /// One copy of the app per user session, so two copies never fight over a game window: a named
-/// mutex, held from start to quit, says which copy runs, and a named event lets a second launch
-/// ask that copy to open its list window before the second one exits. A copy that takes over from
+/// mutex, held from start to quit, says which copy runs, a named event lets a second launch ask
+/// that copy to open its list window before the second one exits, and another lets
+/// <c>--uninstall</c> ask it to quit. A copy that takes over from
 /// a running one (the restart as administrator) waits for that copy to quit, and so to put its
 /// games back, before it touches any window. Dispose it on the thread that claimed it.
 /// </summary>
@@ -14,13 +15,18 @@ public sealed class SingleInstance : IDisposable
     public const string MutexName = @"Local\GameBackdrop.SingleInstance";
     public const string OpenListEventName = @"Local\GameBackdrop.OpenList";
 
+    /// <summary>The quit event that goes with a guard's mutex: set, the running copy quits.</summary>
+    public static string QuitEventNameFor(string mutexName) => mutexName + ".Quit";
+
     private readonly EventWaitHandle _openList;
+    private readonly EventWaitHandle _quit;
     private readonly Mutex _mutex;
     private bool _disposed;
 
-    private SingleInstance(EventWaitHandle openList, Mutex mutex)
+    private SingleInstance(EventWaitHandle openList, EventWaitHandle quit, Mutex mutex)
     {
         _openList = openList;
+        _quit = quit;
         _mutex = mutex;
     }
 
@@ -38,20 +44,27 @@ public sealed class SingleInstance : IDisposable
     /// <param name="openListEventName">The open-list event's name (tests use their own).</param>
     public static SingleInstance? Claim(string mutexName, string openListEventName, TimeSpan waitForRunningCopy)
     {
-        // The event comes first: once the mutex exists, so does the running copy's event, so a
-        // second launch's signal always has somewhere to go. A copy running as administrator
-        // makes both with an administrators-only DACL, which a normal copy can't open: that copy
-        // runs, and this one can't reach it, so it just exits.
+        // The events come first: once the mutex exists, so do the running copy's events, so a
+        // second launch's or an uninstall's signal always has somewhere to go. A copy running as
+        // administrator makes them all with an administrators-only DACL, which a normal copy can't
+        // open: that copy runs, and this one can't reach it, so it just exits.
         if (TryOpen(() => new EventWaitHandle(false, EventResetMode.AutoReset, openListEventName)) is not { } openList)
             return null;
-        if (TryOpen(() => new Mutex(initiallyOwned: false, mutexName)) is not { } mutex)
+        if (TryOpen(() => new EventWaitHandle(false, EventResetMode.AutoReset, QuitEventNameFor(mutexName))) is not { } quit)
         {
             openList.Dispose();
             return null;
         }
-        if (Acquire(mutex, waitForRunningCopy)) return new SingleInstance(openList, mutex);
+        if (TryOpen(() => new Mutex(initiallyOwned: false, mutexName)) is not { } mutex)
+        {
+            openList.Dispose();
+            quit.Dispose();
+            return null;
+        }
+        if (Acquire(mutex, waitForRunningCopy)) return new SingleInstance(openList, quit, mutex);
 
         mutex.Dispose();
+        quit.Dispose();
         if (waitForRunningCopy == TimeSpan.Zero)
         {
             // This launch was the user's last input, so it may hand the foreground on: the running
@@ -93,10 +106,19 @@ public sealed class SingleInstance : IDisposable
     /// again, until the returned registration is disposed. Dispose it before the context's UI goes:
     /// disposal waits for a signal being handled, so none is posted to a torn-down context.
     /// </summary>
-    public IDisposable OnSecondLaunch(SynchronizationContext context, Action openList)
+    public IDisposable OnSecondLaunch(SynchronizationContext context, Action openList) => Listen(_openList, context, openList);
+
+    /// <summary>
+    /// Run <paramref name="quit"/> on <paramref name="context"/> when <c>--uninstall</c> asks this
+    /// copy to quit, as <see cref="OnSecondLaunch"/> does for a second launch. A quit asked before
+    /// this is called is kept, and runs as soon as it is.
+    /// </summary>
+    public IDisposable OnQuit(SynchronizationContext context, Action quit) => Listen(_quit, context, quit);
+
+    private static Listening Listen(EventWaitHandle signal, SynchronizationContext context, Action action)
     {
-        var wait = ThreadPool.RegisterWaitForSingleObject(_openList,
-            (_, _) => context.Post(_ => openList(), null), null, Timeout.Infinite, executeOnlyOnce: false);
+        var wait = ThreadPool.RegisterWaitForSingleObject(signal,
+            (_, _) => context.Post(_ => action(), null), null, Timeout.Infinite, executeOnlyOnce: false);
         return new Listening(wait);
     }
 
@@ -105,6 +127,7 @@ public sealed class SingleInstance : IDisposable
         if (_disposed) return;
         _disposed = true;
         _openList.Dispose();
+        _quit.Dispose();
         // Let go before closing, so a copy taking over gets it at once rather than as abandoned.
         _mutex.ReleaseMutex();
         _mutex.Dispose();
