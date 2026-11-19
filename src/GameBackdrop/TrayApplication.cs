@@ -81,7 +81,7 @@ internal sealed class TrayApplication : ApplicationContext
         };
         _icon = new NotifyIcon
         {
-            Icon = SystemIcons.Application,
+            Icon = AppIcon.Small,
             Text = Elevated ? "Game Backdrop (administrator)" : "Game Backdrop",
             ContextMenuStrip = menu,
             Visible = true,

@@ -25,7 +25,7 @@ internal sealed class GameListForm : Form
     {
         _model = model;
         Text = "Game Backdrop: games";
-        Icon = SystemIcons.Application;
+        Icon = AppIcon.Large;
         Font = SystemFonts.MessageBoxFont ?? Font;
         AutoScaleDimensions = new SizeF(96F, 96F);
         AutoScaleMode = AutoScaleMode.Dpi;

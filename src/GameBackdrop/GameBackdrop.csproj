@@ -12,7 +12,12 @@
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <!-- Roughly halves the exe for a small cost at start. -->
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <!-- Drawn by tools/make-icon.ps1. -->
+    <ApplicationIcon>GameBackdrop.ico</ApplicationIcon>
   </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="GameBackdrop.ico" LogicalName="GameBackdrop.GameBackdrop.ico" />
+  </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\GameBackdrop.Core\GameBackdrop.Core.csproj" />
     <ProjectReference Include="..\GameBackdrop.Windows\GameBackdrop.Windows.csproj" />
