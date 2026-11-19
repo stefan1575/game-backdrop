@@ -1,0 +1,92 @@
+name: Release
+
+# Pushing a version tag (v0.1.0) builds, tests and publishes the exe with that version, attaches
+# it to a GitHub Release, and points the Scoop manifest on main at it.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+# One run per tag at a time (a rerun waits for the run before it). Different tags run side by
+# side: a shared group would keep only one pending run and cancel the others, dropping a release.
+# Their manifest commits on main are reconciled by the retry in the last step.
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Version from the tag
+        id: version
+        shell: pwsh
+        run: |
+          $version = '${{ github.ref_name }}'.TrimStart('v')
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "The tag ${{ github.ref_name }} isn't vMAJOR.MINOR.PATCH." }
+          "version=$version" >> $env:GITHUB_OUTPUT
+      - run: dotnet build -c Release -p:Version=${{ steps.version.outputs.version }}
+      - run: dotnet test -c Release --no-build
+      - run: dotnet publish src/GameBackdrop -c Release -o publish -p:Version=${{ steps.version.outputs.version }}
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        # A rerun never replaces an exe already uploaded to the release (an upload that fails after
+        # --clobber deleted it would leave the manifest pointing at nothing): it uses that exe, so
+        # the manifest's hash is the published file's. An asset a failed upload left half there
+        # (state "starter") is deleted and uploaded again. A draft left by a cancelled run is published.
+        run: |
+          $tag = '${{ github.ref_name }}'
+          $json = gh release view $tag --json isDraft,assets 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag publish/GameBackdrop.exe --title "Game Backdrop ${{ steps.version.outputs.version }}" --generate-notes
+            exit $LASTEXITCODE
+          }
+          $release = $json | ConvertFrom-Json
+          $asset = $release.assets | Where-Object name -eq 'GameBackdrop.exe'
+          if ($asset.state -eq 'uploaded') {
+            gh release download $tag --pattern GameBackdrop.exe --dir publish --clobber
+          } else {
+            if ($asset) {
+              gh release delete-asset $tag GameBackdrop.exe --yes
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            }
+            gh release upload $tag publish/GameBackdrop.exe
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($release.isDraft) { gh release edit $tag --draft=false }
+          exit $LASTEXITCODE
+      - name: Point the Scoop manifest at the release
+        shell: pwsh
+        run: |
+          $version = '${{ steps.version.outputs.version }}'
+          $hash = (Get-FileHash publish/GameBackdrop.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          # Another tag's run can push to main between this run's fetch and push: start again from
+          # the new main, a few times.
+          for ($try = 1; $try -le 5; $try++) {
+            git fetch origin main
+            git checkout -B main origin/main
+            git reset --hard origin/main
+            # Runs can finish out of tag order: the manifest only ever moves to a newer version.
+            $current = (Get-Content bucket/game-backdrop.json -Raw | ConvertFrom-Json).version
+            if ([version]$version -lt [version]$current) { Write-Host "The manifest is already at $current."; exit 0 }
+            ./tools/update-scoop-manifest.ps1 -Manifest bucket/game-backdrop.json -Version $version -Hash $hash
+            git add bucket/game-backdrop.json
+            # A rerun whose manifest commit already landed has nothing to commit.
+            git diff --cached --quiet
+            if ($LASTEXITCODE -eq 0) { Write-Host 'The manifest already points at this release.'; exit 0 }
+            git commit -m "Scoop: game-backdrop $version"
+            git push origin main
+            if ($LASTEXITCODE -eq 0) { exit 0 }
+            Start-Sleep -Seconds (5 * $try)
+          }
+          throw 'Could not push the manifest to main.'

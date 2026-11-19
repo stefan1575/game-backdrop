@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.Diagnostics;
 using GameBackdrop.Core.Settings;
 using GameBackdrop.Core.Startup;
 using GameBackdrop.Windows;
@@ -22,19 +24,36 @@ internal static class Program
     public const string StartedByTaskFlag = "--started-by-task";
 
     /// <summary>
+    /// Run by a package manager before it deletes the exe: quit the running copy (which puts its
+    /// games back), remove the Startup shortcut and the task, and exit 0, or 1 with a message.
+    /// </summary>
+    public const string UninstallFlag = "--uninstall";
+
+    /// <summary>
+    /// Passed with <see cref="UninstallFlag"/> to the elevated rerun: the Startup folder and task
+    /// name of the user who asked, since an administrator's credentials may be another account's.
+    /// </summary>
+    private const string StartupFolderFlag = "--startup-folder", TaskNameFlag = "--task-name";
+
+    /// <summary>One wait for the running copy to let go; <see cref="Core.Startup.Uninstall.DefaultAttempts"/> of them make a minute.</summary>
+    private static readonly TimeSpan UninstallSlice = TimeSpan.FromMilliseconds(250);
+
+    private const int ErrorCancelled = 1223;
+
+    /// <summary>
     /// How long a takeover waits. The copy quitting has put its games back before it starts this
     /// one, so it normally lets go at once; the margin is for a slow quit on a busy PC.
     /// </summary>
     private static readonly TimeSpan TakeoverWait = TimeSpan.FromSeconds(60);
 
     /// <summary>
-    /// Usage: <c>GameBackdrop.exe [--settings &lt;path&gt;] [--takeover]</c>. The settings file
+    /// Usage: <c>GameBackdrop.exe [--settings &lt;path&gt;] [--takeover | --uninstall]</c>. The settings file
     /// defaults to <c>%APPDATA%\GameBackdrop\settings.json</c>, and the Start at logon shortcut
     /// goes in the user's Startup folder. A run with its own <c>--settings</c> file keeps its
     /// shortcut in a <c>Startup</c> folder beside that file instead, and has a scheduled task of
     /// its own, so a test run leaves the real ones alone. A launch that finds the "Always run as
     /// administrator" task runs it and exits. A second launch opens the running copy's game list
-    /// window and exits.
+    /// window and exits. <c>--uninstall</c> tidies up for a package manager's uninstall.
     /// </summary>
     [STAThread]
     private static int Main(string[] args)
@@ -44,9 +63,21 @@ internal static class Program
         var customSettings = SettingsPathFrom(args);
         var store = new SettingsStore(customSettings ?? SettingsStore.DefaultPath);
         var exe = Environment.ProcessPath ?? Application.ExecutablePath;
-        var task = new AdministratorTask(
-            new ScheduledTask(ScheduledTask.Folder, ScheduledTask.NameFor(customSettings), exe, TaskArguments(customSettings)), exe);
-        var startAtLogon = new StartAtLogon(store, StartupShortcutFor(exe, customSettings), task);
+        var quitEventName = SingleInstance.QuitEventNameFor(customSettings);
+        if (args.Contains(UninstallFlag))
+        {
+            var startupFolder = ValueOf(args, StartupFolderFlag) ?? StartupFolderFor(customSettings);
+            var taskName = ValueOf(args, TaskNameFlag) ?? ScheduledTask.NameFor(customSettings);
+            var uninstall = new Uninstall(new RunningCopy(UninstallSlice, quitEventName),
+                new StartupShortcut(startupFolder, exe, ""), new ScheduledTask(ScheduledTask.Folder, taskName, exe, ""));
+            return Uninstall(uninstall, exe, customSettings, startupFolder, taskName);
+        }
+
+        var scheduledTask = new ScheduledTask(ScheduledTask.Folder, ScheduledTask.NameFor(customSettings), exe, TaskArguments(customSettings));
+        var shortcut = StartupShortcutFor(exe, customSettings);
+
+        var task = new AdministratorTask(scheduledTask, exe);
+        var startAtLogon = new StartAtLogon(store, shortcut, task);
         var always = new AlwaysAsAdministrator(task, startAtLogon);
 
         // The task starts the elevated copy, which takes it from here (a second launch included).
@@ -54,7 +85,7 @@ internal static class Program
             return 0;
 
         // Disposed last, after the tray has put every game back: only then may a copy taking over start.
-        using var instance = SingleInstance.Claim(takeover ? TakeoverWait : TimeSpan.Zero);
+        using var instance = SingleInstance.Claim(takeover ? TakeoverWait : TimeSpan.Zero, quitEventName);
         if (instance is null)
         {
             if (takeover)
@@ -70,16 +101,79 @@ internal static class Program
         // Declared after the tray, so it stops (and waits out a signal in flight) before the tray
         // and its context are disposed.
         using var secondLaunches = instance.OnSecondLaunch(SynchronizationContext.Current!, tray.ShowList);
+        using var quitRequests = instance.OnQuitRequest(SynchronizationContext.Current!, tray.QuitForUninstall);
         Application.Run(tray);
         return 0;
     }
 
-    private static StartupShortcut StartupShortcutFor(string exe, string? customSettings)
+    /// <summary>
+    /// <c>--uninstall</c>: tidy up, as administrator if the task or the running copy needs that (an
+    /// elevated copy of this run, so one UAC prompt). Silent when it's done.
+    /// </summary>
+    private static int Uninstall(Uninstall uninstall, string exe, string? customSettings, string startupFolder, string taskName)
     {
-        return customSettings is null
-            ? new StartupShortcut(StartupShortcut.UserStartupFolder, exe, "")
-            : new StartupShortcut(Path.Combine(Path.GetDirectoryName(customSettings)!, "Startup"), exe,
-                $"--settings \"{customSettings}\"");
+        UninstallResult result;
+        try
+        {
+            result = uninstall.Run(Environment.IsPrivilegedProcess);
+        }
+        catch (Exception e) when (AlwaysAsAdministrator.IsTaskSchedulerError(e))
+        {
+            return Failed($"Couldn't remove what starts Game Backdrop: {e.Message}");
+        }
+        switch (result)
+        {
+            case UninstallResult.Done:
+                return 0;
+            case UninstallResult.StillRunning:
+                return Failed("Game Backdrop is still running: it couldn't put a game window back, or it didn't quit. " +
+                    "Close the game or quit Game Backdrop from its tray menu, then uninstall again.");
+        }
+
+        var start = new ProcessStartInfo(exe) { UseShellExecute = true, Verb = "runas" };
+        start.ArgumentList.Add(UninstallFlag);
+        start.ArgumentList.Add(StartupFolderFlag);
+        start.ArgumentList.Add(startupFolder);
+        start.ArgumentList.Add(TaskNameFlag);
+        start.ArgumentList.Add(taskName);
+        // The full path: the elevated copy may start in another folder.
+        if (customSettings is not null)
+        {
+            start.ArgumentList.Add("--settings");
+            start.ArgumentList.Add(customSettings);
+        }
+        try
+        {
+            using var elevated = Process.Start(start)!;
+            elevated.WaitForExit();
+            return elevated.ExitCode;
+        }
+        catch (Win32Exception e) when (e.NativeErrorCode == ErrorCancelled)
+        {
+            return Failed("Uninstalling needs administrator, to remove the Always run as administrator task or quit a copy running as administrator. Nothing was removed.");
+        }
+        catch (Win32Exception e)
+        {
+            return Failed($"Couldn't start the uninstall as administrator: {e.Message}");
+        }
+    }
+
+    private static int Failed(string message)
+    {
+        MessageBox.Show(message, "Game Backdrop", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        return 1;
+    }
+
+    private static StartupShortcut StartupShortcutFor(string exe, string? customSettings) =>
+        new(StartupFolderFor(customSettings), exe, customSettings is null ? "" : $"--settings \"{customSettings}\"");
+
+    private static string StartupFolderFor(string? customSettings) =>
+        customSettings is null ? StartupShortcut.UserStartupFolder : Path.Combine(Path.GetDirectoryName(customSettings)!, "Startup");
+
+    private static string? ValueOf(string[] args, string flag)
+    {
+        var i = Array.IndexOf(args, flag);
+        return i >= 0 && i + 1 < args.Length ? args[i + 1] : null;
     }
 
     /// <summary>The task's action: this exe, with the same <c>--settings</c> argument, if any.</summary>
