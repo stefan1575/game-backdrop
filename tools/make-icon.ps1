@@ -6,7 +6,9 @@ param([string] $Preview)
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 
-$sizes = 16, 20, 24, 32, 40, 48, 64, 256
+# 96 and 128 too: System.Drawing.Icon never picks the 256 entry (stored as 0), so at 250%+
+# scaling the large icon size (80, 96) would otherwise stretch the 64.
+$sizes = 16, 20, 24, 32, 40, 48, 64, 96, 128, 256
 $out = Join-Path $PSScriptRoot '..\src\GameBackdrop\GameBackdrop.ico'
 
 function New-RoundedRect([float] $x, [float] $y, [float] $w, [float] $h, [float] $r) {
@@ -89,6 +91,8 @@ Write-Host "Wrote $out"
 
 # A sheet of every size on light and dark grounds, at 4x, for a look.
 if ($Preview) {
+    # .NET resolves a relative path against the process's folder, not PowerShell's location.
+    $Preview = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Preview)
     $pad = 16
     $cell = 256 + $pad
     $sheet = New-Object System.Drawing.Bitmap ($cell * $sizes.Count + $pad), (2 * $cell + $pad)
