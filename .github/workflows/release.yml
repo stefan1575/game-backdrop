@@ -9,6 +9,12 @@ on:
 permissions:
   contents: write
 
+# One release at a time: two tags pushed together would otherwise both commit the Scoop manifest
+# on the same main, and the second push would be rejected.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: windows-latest
@@ -50,6 +56,9 @@ jobs:
           $hash = (Get-FileHash publish/GameBackdrop.exe -Algorithm SHA256).Hash.ToLowerInvariant()
           git fetch origin main
           git checkout -B main origin/main
+          # Jobs can run out of tag order: the manifest only ever moves to a newer version.
+          $current = (Get-Content bucket/game-backdrop.json -Raw | ConvertFrom-Json).version
+          if ([version]$version -lt [version]$current) { Write-Host "The manifest is already at $current."; exit 0 }
           ./tools/update-scoop-manifest.ps1 -Manifest bucket/game-backdrop.json -Version $version -Hash $hash
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'

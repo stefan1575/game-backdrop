@@ -1,4 +1,6 @@
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text;
 using GameBackdrop.Core.Startup;
 
 namespace GameBackdrop.Windows;
@@ -34,13 +36,20 @@ public sealed class SingleInstance : IDisposable
     /// its list window. A takeover waits up to <paramref name="waitForRunningCopy"/> for the
     /// running copy to quit, and asks it nothing.
     /// </summary>
-    public static SingleInstance? Claim(TimeSpan waitForRunningCopy = default) =>
-        Claim(MutexName, OpenListEventName, waitForRunningCopy);
+    /// <param name="quitEventName">This copy's quit signal, from <see cref="QuitEventNameFor"/>.</param>
+    public static SingleInstance? Claim(TimeSpan waitForRunningCopy, string quitEventName) =>
+        Claim(MutexName, OpenListEventName, quitEventName, waitForRunningCopy);
 
-    /// <inheritdoc cref="Claim(TimeSpan)"/>
+    /// <inheritdoc cref="Claim(TimeSpan, string)"/>
     /// <param name="mutexName">The mutex's name (tests use their own).</param>
     /// <param name="openListEventName">The open-list event's name (tests use their own).</param>
-    public static SingleInstance? Claim(string mutexName, string openListEventName, TimeSpan waitForRunningCopy)
+    /// <remarks>The quit signal is <paramref name="mutexName"/><c>.Quit</c>.</remarks>
+    public static SingleInstance? Claim(string mutexName, string openListEventName, TimeSpan waitForRunningCopy) =>
+        Claim(mutexName, openListEventName, mutexName + ".Quit", waitForRunningCopy);
+
+    /// <inheritdoc cref="Claim(string, string, TimeSpan)"/>
+    /// <param name="quitEventName">This copy's quit signal.</param>
+    public static SingleInstance? Claim(string mutexName, string openListEventName, string quitEventName, TimeSpan waitForRunningCopy)
     {
         // The events come first: once the mutex exists, so do the running copy's events, so a
         // second launch's or an uninstall's signal always has somewhere to go. A copy running as
@@ -48,7 +57,7 @@ public sealed class SingleInstance : IDisposable
         // open: that copy runs, and this one can't reach it, so it just exits.
         if (TryOpen(() => new EventWaitHandle(false, EventResetMode.AutoReset, openListEventName)) is not { } openList)
             return null;
-        if (TryOpen(() => new EventWaitHandle(false, EventResetMode.AutoReset, QuitEventNameFor(mutexName))) is not { } quit)
+        if (TryOpen(() => new EventWaitHandle(false, EventResetMode.AutoReset, quitEventName)) is not { } quit)
         {
             openList.Dispose();
             return null;
@@ -74,20 +83,30 @@ public sealed class SingleInstance : IDisposable
         return null;
     }
 
-    /// <summary>The quit event that goes with the guard's mutex.</summary>
-    public static string QuitEventNameFor(string mutexName) => mutexName + ".Quit";
+    /// <summary>
+    /// The quit signal of a settings scope: one copy runs per session whatever its settings, but a
+    /// run with its own <c>--settings</c> file has a quit signal of its own, derived from that path,
+    /// so its <c>--uninstall</c> never quits the real app.
+    /// </summary>
+    public static string QuitEventNameFor(string? customSettings)
+    {
+        const string name = @"Local\GameBackdrop.Quit";
+        if (customSettings is null) return name;
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(customSettings.ToUpperInvariant()));
+        return $"{name}.test-{Convert.ToHexString(hash, 0, 4)}";
+    }
 
     /// <summary>
-    /// Ask the running copy to quit, as its tray menu's Quit does. Only signals: wait for it to go
-    /// with <see cref="Claim(string, string, TimeSpan)"/>. A copy running as administrator can be
-    /// asked only by a copy that is too.
+    /// Ask the running copy with this quit signal to quit. Only signals: wait for it to go with
+    /// <see cref="Claim(string, string, string, TimeSpan)"/>. A copy running as administrator can
+    /// be asked only by a copy that is too.
     /// </summary>
-    public static QuitRequest AskToQuit(string mutexName = MutexName)
+    public static QuitRequest AskToQuit(string quitEventName)
     {
         EventWaitHandle quit;
         try
         {
-            if (!EventWaitHandle.TryOpenExisting(QuitEventNameFor(mutexName), out var opened)) return QuitRequest.NoneRunning;
+            if (!EventWaitHandle.TryOpenExisting(quitEventName, out var opened)) return QuitRequest.NoneRunning;
             quit = opened;
         }
         catch (UnauthorizedAccessException)

@@ -3,7 +3,7 @@ namespace GameBackdrop.Core.Startup;
 /// <summary>What asking the running copy to quit came to.</summary>
 public enum QuitRequest
 {
-    /// <summary>No copy runs.</summary>
+    /// <summary>No copy of this settings scope runs.</summary>
     NoneRunning,
 
     /// <summary>A copy runs and was asked to quit.</summary>
@@ -13,29 +13,36 @@ public enum QuitRequest
     NeedsAdministrator,
 }
 
-/// <summary>The copy of the app running in this session, as seen from another copy.</summary>
+/// <summary>
+/// The copy of the app running in this session, as seen from another copy. One copy runs per
+/// session whatever its settings file, but each settings scope (the real one, or a test run's
+/// <c>--settings</c> file) has its own quit signal, so an uninstall only quits a copy of its own.
+/// </summary>
 public interface IRunningCopy
 {
-    /// <summary>Ask the running copy to quit, as its tray menu's Quit does: it puts every game back first.</summary>
+    /// <summary>
+    /// Ask the running copy of this scope to quit. It quits only once it has put every game back;
+    /// a game it can't put back keeps it running.
+    /// </summary>
     QuitRequest AskToQuit();
 
     /// <summary>
-    /// Wait for the running copy to quit, and hold its place so no copy starts meanwhile: null
-    /// when it didn't quit in time. Dispose the hold to let a copy start again.
+    /// Wait a short while for the running copy to let go, and hold its place so no copy starts
+    /// meanwhile: null when a copy still runs. Dispose the hold to let a copy start again.
     /// </summary>
-    IDisposable? WaitUntilGone();
+    IDisposable? TryHold();
 }
 
 /// <summary>What <see cref="Uninstall.Run"/> came to.</summary>
 public enum UninstallResult
 {
-    /// <summary>Nothing of the app's is left outside its folder, and no copy runs.</summary>
+    /// <summary>Nothing of the app's is left outside its folder, and no copy of this scope runs.</summary>
     Done,
 
     /// <summary>Run it again as administrator: the task, or the copy running, needs that.</summary>
     NeedsAdministrator,
 
-    /// <summary>The running copy didn't quit, so nothing was removed.</summary>
+    /// <summary>The running copy didn't quit (a game it couldn't put back), so nothing was removed.</summary>
     StillRunning,
 }
 
@@ -47,19 +54,57 @@ public enum UninstallResult
 /// </summary>
 public sealed class Uninstall(IRunningCopy running, IStartupShortcut shortcut, IScheduledTask task)
 {
-    public UninstallResult Run(bool elevated)
+    /// <summary>With a quarter-second <see cref="IRunningCopy.TryHold"/>, a minute.</summary>
+    public const int DefaultAttempts = 240;
+
+    public UninstallResult Run(bool elevated, int attempts = DefaultAttempts)
     {
         // The task runs at run level highest, and only an administrator may delete it. Asking for
         // that before anything else means the one prompt comes before the app quits, not after.
         if (!elevated && task.Read() is not null) return UninstallResult.NeedsAdministrator;
-        if (running.AskToQuit() == QuitRequest.NeedsAdministrator)
-            return elevated ? UninstallResult.StillRunning : UninstallResult.NeedsAdministrator;
 
-        // Held while the shortcut and task go, so a logon start can't come back between them.
-        using var gone = running.WaitUntilGone();
-        if (gone is null) return UninstallResult.StillRunning;
+        var asked = false;
+        var heldByAnotherScope = 0;
+        for (var attempt = 0; attempt < attempts; attempt++)
+        {
+            // Asked until a copy has been: one that starts after a "none running" is asked too.
+            // Once asked, it's left to put its games back rather than asked again.
+            if (!asked)
+            {
+                switch (running.AskToQuit())
+                {
+                    case QuitRequest.NeedsAdministrator:
+                        return elevated ? UninstallResult.StillRunning : UninstallResult.NeedsAdministrator;
+                    case QuitRequest.Asked:
+                        asked = true;
+                        break;
+                }
+            }
+
+            // Held while the shortcut and task go, so a logon start can't come back between them.
+            using (var hold = running.TryHold())
+            {
+                if (hold is not null)
+                {
+                    Remove();
+                    return UninstallResult.Done;
+                }
+            }
+
+            // A copy makes its quit signal before it takes the guard, so a guard held twice running
+            // with no signal of this scope to ask is another scope's copy: leave it be.
+            if (!asked && ++heldByAnotherScope >= 2)
+            {
+                Remove();
+                return UninstallResult.Done;
+            }
+        }
+        return UninstallResult.StillRunning;
+    }
+
+    private void Remove()
+    {
         shortcut.Remove();
         task.Delete();
-        return UninstallResult.Done;
     }
 }

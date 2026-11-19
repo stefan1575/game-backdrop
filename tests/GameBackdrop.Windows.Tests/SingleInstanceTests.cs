@@ -12,6 +12,7 @@ public sealed class SingleInstanceTests
 {
     private readonly string _name = $@"Local\GameBackdrop.Tests.{Guid.NewGuid():N}";
     private string _event => _name + ".OpenList";
+    private string _quit => _name + ".Quit";
 
     [Fact]
     public void A_second_launch_asks_the_running_copy_to_open_its_list()
@@ -131,29 +132,29 @@ public sealed class SingleInstanceTests
         using var quitAsked = new ManualResetEventSlim();
         using var running = new HeldElsewhere(_name, onQuit: quitAsked.Set);
 
-        Assert.Equal(QuitRequest.Asked, SingleInstance.AskToQuit(_name));
+        Assert.Equal(QuitRequest.Asked, SingleInstance.AskToQuit(_quit));
         Assert.True(quitAsked.Wait(TimeSpan.FromSeconds(5)), "the running copy wasn't asked to quit");
 
         running.Release();
-        using var gone = new RunningCopy(TimeSpan.FromSeconds(5), _name, _event).WaitUntilGone();
+        using var gone = new RunningCopy(TimeSpan.FromSeconds(5), _quit, _name, _event).TryHold();
         Assert.NotNull(gone);
     }
 
     [Fact]
     public void With_no_copy_running_there_is_none_to_ask()
     {
-        Assert.Equal(QuitRequest.NoneRunning, SingleInstance.AskToQuit(_name));
-        using var gone = new RunningCopy(TimeSpan.Zero, _name, _event).WaitUntilGone();
+        Assert.Equal(QuitRequest.NoneRunning, SingleInstance.AskToQuit(_quit));
+        using var gone = new RunningCopy(TimeSpan.Zero, _quit, _name, _event).TryHold();
         Assert.NotNull(gone);
     }
 
     [Fact]
     public void A_quit_event_this_user_may_not_open_needs_administrator()
     {
-        var locked = CreateLockedEvent(SingleInstance.QuitEventNameFor(_name));
+        var locked = CreateLockedEvent(_quit);
         try
         {
-            Assert.Equal(QuitRequest.NeedsAdministrator, SingleInstance.AskToQuit(_name));
+            Assert.Equal(QuitRequest.NeedsAdministrator, SingleInstance.AskToQuit(_quit));
         }
         finally
         {
@@ -171,6 +172,28 @@ public sealed class SingleInstanceTests
         Assert.Null(OnOwnThread(() => SingleInstance.Claim(_name, _event, TimeSpan.Zero)));
 
         Assert.False(quitAsked.Wait(TimeSpan.FromMilliseconds(500)), "a second launch asked the running copy to quit");
+    }
+
+    [Fact]
+    public void Each_settings_scope_has_its_own_quit_signal()
+    {
+        var real = SingleInstance.QuitEventNameFor(null);
+        var test = SingleInstance.QuitEventNameFor(@"C:\Temp\a\settings.json");
+
+        Assert.NotEqual(real, test);
+        Assert.Equal(test, SingleInstance.QuitEventNameFor(@"c:\temp\A\SETTINGS.json"));
+        Assert.NotEqual(test, SingleInstance.QuitEventNameFor(@"C:\Temp\b\settings.json"));
+    }
+
+    [Fact]
+    public void A_copy_of_another_scope_is_not_asked_to_quit()
+    {
+        using var quitAsked = new ManualResetEventSlim();
+        using var running = new HeldElsewhere(_name, onQuit: quitAsked.Set);
+
+        Assert.Equal(QuitRequest.NoneRunning, SingleInstance.AskToQuit(_name + ".Quit.test-0000"));
+
+        Assert.False(quitAsked.Wait(TimeSpan.FromMilliseconds(500)), "a copy of another scope was asked to quit");
     }
 
     private static T OnOwnThread<T>(Func<T> work)

@@ -295,6 +295,27 @@ internal sealed class TrayApplication : ApplicationContext
         return true;
     }
 
+    /// <summary>
+    /// Another copy's <c>--uninstall</c> asks this one to quit. Every game is put back first, as
+    /// in a hand-over; a game that can't be put back keeps this copy running with its games
+    /// changed again, so the uninstall fails rather than delete the exe with a game left changed.
+    /// </summary>
+    public void QuitForUninstall()
+    {
+        if (_handingOver) return;
+        _handingOver = true;
+        var result = _controller.HandOver(() => true, RestoreRetries, () => Thread.Sleep(RestoreRetryDelay));
+        if (result.HandedOver)
+        {
+            ExitThread();
+            return;
+        }
+        ShowBalloon(10000, "Game Backdrop wasn't uninstalled",
+            $"These game windows couldn't be put back first, so Game Backdrop carries on as it was:\n{Names(result.NotRestored)}",
+            ToolTipIcon.Warning);
+        _handingOver = false;
+    }
+
     protected override void ExitThreadCore()
     {
         _hotkey?.Dispose();
