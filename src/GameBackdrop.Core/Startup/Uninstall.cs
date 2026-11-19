@@ -64,21 +64,15 @@ public sealed class Uninstall(IRunningCopy running, IStartupShortcut shortcut, I
         if (!elevated && task.Read() is not null) return UninstallResult.NeedsAdministrator;
 
         var asked = false;
-        var heldByAnotherScope = 0;
         for (var attempt = 0; attempt < attempts; attempt++)
         {
             // Asked until a copy has been: one that starts after a "none running" is asked too.
             // Once asked, it's left to put its games back rather than asked again.
             if (!asked)
             {
-                switch (running.AskToQuit())
-                {
-                    case QuitRequest.NeedsAdministrator:
-                        return elevated ? UninstallResult.StillRunning : UninstallResult.NeedsAdministrator;
-                    case QuitRequest.Asked:
-                        asked = true;
-                        break;
-                }
+                var request = running.AskToQuit();
+                if (request == QuitRequest.NeedsAdministrator) return NeedsAdministrator(elevated);
+                asked = request == QuitRequest.Asked;
             }
 
             // Held while the shortcut and task go, so a logon start can't come back between them.
@@ -90,17 +84,28 @@ public sealed class Uninstall(IRunningCopy running, IStartupShortcut shortcut, I
                     return UninstallResult.Done;
                 }
             }
+            if (asked) continue;
 
-            // A copy makes its quit signal before it takes the guard, so a guard held twice running
-            // with no signal of this scope to ask is another scope's copy: leave it be.
-            if (!asked && ++heldByAnotherScope >= 2)
+            // The guard is held. A copy makes its quit signal before it takes the guard, so if no
+            // signal of this scope is there to ask now, after the guard was found held, the holder
+            // is another scope's copy: leave it be. One of this scope that took over meanwhile is
+            // asked here, and waited for.
+            var afterHeld = running.AskToQuit();
+            if (afterHeld == QuitRequest.NeedsAdministrator) return NeedsAdministrator(elevated);
+            if (afterHeld == QuitRequest.Asked)
             {
-                Remove();
-                return UninstallResult.Done;
+                asked = true;
+                continue;
             }
+            Remove();
+            return UninstallResult.Done;
         }
         return UninstallResult.StillRunning;
     }
+
+    /// <summary>A copy of this scope runs as administrator: rerun as administrator, or, already that, it can't be asked.</summary>
+    private static UninstallResult NeedsAdministrator(bool elevated) =>
+        elevated ? UninstallResult.StillRunning : UninstallResult.NeedsAdministrator;
 
     private void Remove()
     {

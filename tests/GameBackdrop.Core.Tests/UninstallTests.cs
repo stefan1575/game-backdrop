@@ -83,6 +83,22 @@ public sealed class UninstallTests
     }
 
     [Fact]
+    public void A_copy_that_takes_over_from_another_scope_during_the_wait_is_asked()
+    {
+        // Another scope's copy holds the guard at the first look; one of this scope takes it over
+        // while the uninstall waits. The look after the failed hold finds it and asks it.
+        _running.OtherScopeRunning = true;
+        _running.ReplacesOtherScopeDuringFirstHold = true;
+        _shortcut.PlaceByHand();
+
+        Assert.Equal(UninstallResult.Done, Run(elevated: false));
+
+        Assert.Equal(1, _running.Asks);
+        Assert.False(_running.Running);
+        Assert.False(_shortcut.Exists);
+    }
+
+    [Fact]
     public void The_task_needs_administrator_before_the_running_copy_is_asked_anything()
     {
         _running.Running = true;
@@ -145,6 +161,9 @@ public sealed class UninstallTests
         /// <summary>A copy of this scope starts just after the first ask finds none.</summary>
         public bool StartsAfterFirstAsk { get; set; }
 
+        /// <summary>A copy of this scope takes the guard over from the other scope's during the first hold.</summary>
+        public bool ReplacesOtherScopeDuringFirstHold { get; set; }
+
         public bool Elevated { get; set; }
         public bool AskerElevated { get; set; }
         public bool Quits { get; set; } = true;
@@ -169,6 +188,12 @@ public sealed class UninstallTests
 
         public IDisposable? TryHold()
         {
+            if (ReplacesOtherScopeDuringFirstHold && OtherScopeRunning)
+            {
+                OtherScopeRunning = false;
+                Running = true;
+                return null;
+            }
             if (Running && _asked && Quits) Running = false;
             return Running || OtherScopeRunning ? null : new Hold();
         }
