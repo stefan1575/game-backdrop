@@ -56,3 +56,11 @@ and black. Say which way each picture was made.
 - `list`, reused for #33 (`pr-34/`): the list window's title-bar icon, `before` on main and
   `after` on the PR. `exe-icon.png` is each exe's own icon as Explorer gets it
   (`Icon.ExtractAssociatedIcon`, drawn at 32 px and at 64 px).
+- `pr-34/after-uninstall-still-running.png` (#33): `harness/pr-34/stubborn-copy.ps1` holds the
+  single-instance mutex and a test scope's quit event and never quits, standing in for a copy
+  with a game it can't put back; `GameBackdrop.exe --settings <that scope> --uninstall` waits its
+  minute and shows the dialog, which `capture-dialog.ps1` captures from its own pixels
+  (`PrintWindow`) and closes. `after-start-menu-entry.png`: after a `scoop install` from a local
+  manifest, the Start menu shortcut's own name and icon (`Icon.ExtractAssociatedIcon` on the
+  `.lnk`), drawn rather than captured, since the Start menu shows other programs. Neither has a
+  `before`: main has no `--uninstall` and no Scoop package.
