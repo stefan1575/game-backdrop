@@ -2,6 +2,7 @@
     "version": "0.0.0",
     "description": "Blacks out the rest of the monitor around a windowed game, and strips its title bar and border.",
     "homepage": "https://github.com/stefan1575/game-backdrop",
+    "license": "MIT",
     "architecture": {
         "64bit": {
             "url": "https://github.com/stefan1575/game-backdrop/releases/download/v0.0.0/GameBackdrop.exe",

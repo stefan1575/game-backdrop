@@ -86,3 +86,7 @@ points the Scoop manifest (`bucket/game-backdrop.json`) on `main` at it, through
 `GameBackdrop.exe --settings <path>` runs against another settings file and keeps its Start at
 logon shortcut in a `Startup` folder beside that file, and its Always run as administrator task
 under a name of its own, leaving your real setup alone.
+
+## License
+
+MIT: see [LICENSE](LICENSE).
