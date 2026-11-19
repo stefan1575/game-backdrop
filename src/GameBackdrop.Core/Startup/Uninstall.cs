@@ -98,6 +98,16 @@ public sealed class Uninstall(IRunningCopy running, IStartupShortcut shortcut, I
                 continue;
             }
             Remove();
+
+            // Removed without the guard: if the other scope's copy let go and one of this scope
+            // started meanwhile (and put its shortcut back), it's asked, waited for, and removed after.
+            var afterRemove = running.AskToQuit();
+            if (afterRemove == QuitRequest.NeedsAdministrator) return NeedsAdministrator(elevated);
+            if (afterRemove == QuitRequest.Asked)
+            {
+                asked = true;
+                continue;
+            }
             return UninstallResult.Done;
         }
         return UninstallResult.StillRunning;

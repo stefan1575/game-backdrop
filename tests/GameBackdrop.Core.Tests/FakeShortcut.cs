@@ -20,7 +20,14 @@ public sealed class FakeShortcut : IStartupShortcut
         Exists = true;
     }
 
-    public void Remove() => Exists = false;
+    /// <summary>Runs after the next removal, standing in for something that happens meanwhile.</summary>
+    public Action? OnRemove { get; set; }
+
+    public void Remove()
+    {
+        Exists = false;
+        OnRemove?.Invoke();
+    }
 
     public void PlaceByHand() => Exists = true;
 }

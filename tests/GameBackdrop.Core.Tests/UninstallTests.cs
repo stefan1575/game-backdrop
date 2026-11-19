@@ -99,6 +99,28 @@ public sealed class UninstallTests
     }
 
     [Fact]
+    public void A_copy_that_starts_while_the_shortcut_goes_is_asked_and_its_shortcut_removed_after()
+    {
+        // Another scope's copy holds the guard, so the shortcut goes without it; meanwhile that
+        // copy quits and one of this scope starts and puts its shortcut back.
+        _running.OtherScopeRunning = true;
+        _shortcut.PlaceByHand();
+        _shortcut.OnRemove = () =>
+        {
+            _shortcut.OnRemove = null;
+            _running.OtherScopeRunning = false;
+            _running.Running = true;
+            _shortcut.PlaceByHand();
+        };
+
+        Assert.Equal(UninstallResult.Done, Run(elevated: false));
+
+        Assert.Equal(1, _running.Asks);
+        Assert.False(_running.Running);
+        Assert.False(_shortcut.Exists);
+    }
+
+    [Fact]
     public void The_task_needs_administrator_before_the_running_copy_is_asked_anything()
     {
         _running.Running = true;
