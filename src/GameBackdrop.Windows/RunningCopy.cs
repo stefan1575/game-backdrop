@@ -11,6 +11,9 @@ namespace GameBackdrop.Windows;
 /// <param name="wait">How long <see cref="Quit"/> waits for the copy to put its games back and let go.</param>
 public sealed class RunningCopy(string mutexName, string quitEventName, TimeSpan wait) : IRunningCopy
 {
+    /// <summary>How long <see cref="Quit"/> waits on a guard whose copy has no quit event to be asked through.</summary>
+    public static readonly TimeSpan UnaskedWait = TimeSpan.FromSeconds(3);
+
     /// <summary>The app's own running copy.</summary>
     public static RunningCopy ForApp(TimeSpan wait) =>
         new(SingleInstance.MutexName, SingleInstance.QuitEventNameFor(SingleInstance.MutexName), wait);
@@ -37,6 +40,7 @@ public sealed class RunningCopy(string mutexName, string quitEventName, TimeSpan
 
     public bool Quit()
     {
+        var waitForGuard = wait;
         try
         {
             using var quit = EventWaitHandle.OpenExisting(quitEventName);
@@ -48,7 +52,9 @@ public sealed class RunningCopy(string mutexName, string quitEventName, TimeSpan
         }
         catch (WaitHandleCannotBeOpenedException)
         {
-            // No copy to ask; the guard below says whether one still runs.
+            // No copy to ask: one ending lets go of the guard in a moment, and one from before
+            // there was a quit event never will, so this waits only that moment.
+            if (waitForGuard > UnaskedWait) waitForGuard = UnaskedWait;
         }
 
         Mutex mutex;
@@ -68,7 +74,7 @@ public sealed class RunningCopy(string mutexName, string quitEventName, TimeSpan
         {
             try
             {
-                if (!mutex.WaitOne(wait)) return false;
+                if (!mutex.WaitOne(waitForGuard)) return false;
             }
             catch (AbandonedMutexException)
             {

@@ -46,6 +46,37 @@ public sealed class RunningCopyTests
     }
 
     [Fact]
+    public void A_copy_with_no_quit_event_to_ask_is_waited_for_only_a_moment()
+    {
+        // A copy from before the quit event holds the guard and will never be asked to let go.
+        using var held = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var holder = new Thread(() =>
+        {
+            using var mutex = new Mutex(initiallyOwned: true, _name);
+            held.Set();
+            release.Wait();
+            mutex.ReleaseMutex();
+        });
+        holder.Start();
+        held.Wait();
+        try
+        {
+            var copy = Copy(TimeSpan.FromSeconds(60));
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+
+            Assert.Equal(RunningCopyState.Running, copy.Find());
+            Assert.False(copy.Quit());
+            Assert.True(clock.Elapsed < RunningCopy.UnaskedWait + TimeSpan.FromSeconds(2), $"waited {clock.Elapsed}");
+        }
+        finally
+        {
+            release.Set();
+            holder.Join();
+        }
+    }
+
+    [Fact]
     public void A_quit_event_this_user_may_not_open_is_a_copy_out_of_reach()
     {
         // A copy running as administrator makes its objects with an administrators-only DACL; a
