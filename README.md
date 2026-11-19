@@ -8,20 +8,55 @@ nothing is injected into the game.
 
 ## Install
 
-1. Get `GameBackdrop.exe`: publish it yourself (below), or download the `GameBackdrop`
-   artifact from the newest CI run on `main`:
+Each release is one self-contained `GameBackdrop.exe` on
+[GitHub Releases](https://github.com/stefan1575/game-backdrop/releases): no installer, and no
+.NET runtime to install. A package manager downloads it without the browser's Mark of the Web,
+so Windows SmartScreen has nothing to warn about.
 
-   ```
-   gh run list --repo stefan1575/game-backdrop --branch main --event push --status success --limit 1 --json databaseId --jq ".[0].databaseId"
-   gh run download <that id> --repo stefan1575/game-backdrop --name GameBackdrop
-   ```
+### With Scoop
 
-2. Put it somewhere it will stay, e.g. `%LOCALAPPDATA%\Programs\GameBackdrop\GameBackdrop.exe`.
-   It's one self-contained file: no .NET runtime needs installing.
-3. Run it once. It sits in the tray and, on this first run, ticks **Start at logon**: a
-   `Game Backdrop.lnk` shortcut in your Startup folder (`shell:startup`) starts it each time
-   you sign in. Untick it in the tray menu to stop that; the choice is kept in the settings
-   file, so it stays off.
+```
+scoop bucket add game-backdrop https://github.com/stefan1575/game-backdrop
+scoop install game-backdrop
+```
+
+This repo is its own bucket (`bucket/game-backdrop.json`). Start it from the Start menu
+(**Game Backdrop**), or run `GameBackdrop` in a shell.
+
+- **Update:** quit it from the tray, then `scoop update game-backdrop`. Start at logon and
+  Always run as administrator carry on: they point at Scoop's `current` folder, which follows
+  the update.
+- **Uninstall:** `scoop uninstall game-backdrop`. It first runs `GameBackdrop --uninstall`
+  (below); if that fails, the uninstall stops and says why.
+
+### With winget
+
+Coming once the package is in winget's community repository:
+
+```
+winget install stefan1575.GameBackdrop
+```
+
+- **Update:** quit it from the tray, then `winget upgrade stefan1575.GameBackdrop`.
+- **Uninstall:** winget can't run anything as it uninstalls, so first run
+  `GameBackdrop --uninstall`, then `winget uninstall stefan1575.GameBackdrop`.
+
+### Direct download
+
+1. Download `GameBackdrop.exe` from the newest release and put it somewhere it will stay, e.g.
+   `%LOCALAPPDATA%\Programs\GameBackdrop\GameBackdrop.exe`.
+2. The browser marks the file as from the internet, and the exe isn't signed, so the first run
+   brings up SmartScreen's **Windows protected your PC**: click **More info**, then **Run
+   anyway**. (Or, before running it, right-click the file, **Properties**, tick **Unblock**.)
+   It asks only once.
+3. **Update:** quit it from the tray and replace the exe with the new one.
+4. **Uninstall:** run `GameBackdrop.exe --uninstall`, then delete the exe.
+
+### First run
+
+It sits in the tray and, on this first run, ticks **Start at logon**: a `Game Backdrop.lnk`
+shortcut in your Startup folder (`shell:startup`) starts it each time you sign in. Untick it in
+the tray menu to stop that; the choice is kept in the settings file, so it stays off.
 
 If you move the exe, run it once from its new place: with Start at logon on, the shortcut is
 rewritten to point at the exe that's running.
@@ -45,8 +80,17 @@ The game list lives in `%APPDATA%\GameBackdrop\settings.json`:
 }
 ```
 
-To uninstall: untick **Always run as administrator** and **Start at logon**, quit from the tray, then delete the exe and
-`%APPDATA%\GameBackdrop`.
+## Uninstall
+
+`GameBackdrop.exe --uninstall` removes everything the app puts outside its own folder, for you:
+it asks the running copy to quit (which puts every game back first) and waits for it, then
+removes the Start at logon shortcut and the Always run as administrator task. The task, or a
+copy running as administrator, needs administrator, so only then does it ask (one UAC prompt).
+It exits with 0 when done, or 1, with the reason, when it couldn't; nothing running and nothing
+set up is done at once. Scoop runs it for you; for winget and the direct download, run it
+yourself before removing the exe.
+
+The settings file stays: delete `%APPDATA%\GameBackdrop` too to remove your game list.
 
 ## Build, test and publish
 
@@ -61,7 +105,12 @@ dotnet publish src/GameBackdrop -c Release
 The publish leaves one exe, self-contained for win-x64, at
 `src/GameBackdrop/bin/Release/net10.0-windows/win-x64/publish/GameBackdrop.exe`. CI builds,
 tests and publishes on every push and PR, and keeps the exe as the `GameBackdrop` artifact on
-pushes to `main`.
+pushes to `main` (`gh run download <run id> --repo stefan1575/game-backdrop --name GameBackdrop`).
+
+Pushing a `v<major>.<minor>.<patch>` tag (e.g. `git tag v0.1.0`, `git push origin v0.1.0`) builds,
+tests and publishes the exe with that version, attaches it to a GitHub Release, and points the
+Scoop manifest on `main` at it (its version, URL and hash). Until the first tag the manifest is a
+`0.0.0` placeholder.
 
 `GameBackdrop.exe --settings <path>` runs against another settings file and keeps its Start at
 logon shortcut in a `Startup` folder beside that file, and its Always run as administrator task
