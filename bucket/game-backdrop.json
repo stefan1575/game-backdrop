@@ -1,0 +1,20 @@
+{
+    "version": "0.0.0",
+    "description": "Blacks out the rest of the monitor, taskbar included, around a windowed game, centred without its title bar.",
+    "homepage": "https://github.com/stefan1575/game-backdrop",
+    "license": "Unknown",
+    "url": "https://github.com/stefan1575/game-backdrop/releases/download/v0.0.0/GameBackdrop.exe",
+    "hash": "0000000000000000000000000000000000000000000000000000000000000000",
+    "bin": "GameBackdrop.exe",
+    "shortcuts": [
+        [
+            "GameBackdrop.exe",
+            "Game Backdrop"
+        ]
+    ],
+    "pre_uninstall": [
+        "if ($cmd -ne 'uninstall') { return }",
+        "$uninstall = Start-Process \"$dir\\GameBackdrop.exe\" -ArgumentList '--uninstall' -Wait -PassThru -NoNewWindow",
+        "if ($uninstall.ExitCode -ne 0) { throw \"GameBackdrop --uninstall failed (exit code $($uninstall.ExitCode)), so Game Backdrop is still installed. Fix what it said, then run scoop uninstall game-backdrop again.\" }"
+    ]
+}
