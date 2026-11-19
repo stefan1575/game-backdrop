@@ -56,7 +56,8 @@ The game list lives in `%APPDATA%\GameBackdrop\settings.json`:
 
 With Scoop: `scoop uninstall game-backdrop`.
 
-A copy you downloaded: run `GameBackdrop.exe --uninstall`, then delete the exe.
+A copy you downloaded: run `GameBackdrop.exe --uninstall`, then delete the exe. A copy from
+before the first release (a CI artifact) can't be asked to quit: quit it from its tray first.
 
 Either way, `--uninstall` (Scoop runs it for you) quits a running copy, which puts every game
 back, and removes the Start at logon shortcut and the Always run as administrator task. With the
