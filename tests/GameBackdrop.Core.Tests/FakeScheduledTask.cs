@@ -9,11 +9,13 @@ public sealed class FakeScheduledTask(string exePath) : IScheduledTask
     public int Registers { get; private set; }
     public int Runs { get; private set; }
     public bool FailRun { get; set; }
+    public bool FailRead { get; set; }
+    public bool FailDelete { get; set; }
 
     /// <summary>A task left by a copy of the app somewhere else.</summary>
     public void RegisteredBy(string otherExe, bool atLogon = false) => Task = new(otherExe, atLogon);
 
-    public ScheduledTaskInfo? Read() => Task;
+    public ScheduledTaskInfo? Read() => FailRead ? throw new UnauthorizedAccessException("The task can't be read.") : Task;
 
     public void Register(bool atLogon)
     {
@@ -27,5 +29,9 @@ public sealed class FakeScheduledTask(string exePath) : IScheduledTask
         Runs++;
     }
 
-    public void Delete() => Task = null;
+    public void Delete()
+    {
+        if (FailDelete) throw new UnauthorizedAccessException("The task can't be deleted.");
+        Task = null;
+    }
 }

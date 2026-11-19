@@ -8,6 +8,7 @@ public sealed class FakeShortcut : IStartupShortcut
     public bool Exists { get; private set; }
     public int Creates { get; private set; }
     public bool FailNextCreate { get; set; }
+    public bool FailRemove { get; set; }
 
     public void Create()
     {
@@ -20,7 +21,11 @@ public sealed class FakeShortcut : IStartupShortcut
         Exists = true;
     }
 
-    public void Remove() => Exists = false;
+    public void Remove()
+    {
+        if (FailRemove) throw new IOException("The Startup folder can't be written.");
+        Exists = false;
+    }
 
     public void PlaceByHand() => Exists = true;
 }
