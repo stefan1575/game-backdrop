@@ -53,3 +53,6 @@ and black. Say which way each picture was made.
 `side-by-side.ps1` and `grid.ps1` combine pictures for a before/after view.
 - `always-admin` (#31): the tray menu with no game running as administrator, from the screen over
   the menu's own rect. A sixth argument names the prefix (`before` on main, `after` on the PR).
+- `list`, reused for #33 (`pr-34/`): the list window's title-bar icon, `before` on main and
+  `after` on the PR. `exe-icon.png` is each exe's own icon as Explorer gets it
+  (`Icon.ExtractAssociatedIcon`, drawn at 32 px and at 64 px).
