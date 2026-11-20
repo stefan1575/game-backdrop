@@ -317,3 +317,16 @@ internal interface ITaskbarList2
     void SetActiveAlt(nint hwnd);
     void MarkFullscreenWindow(nint hwnd, [MarshalAs(UnmanagedType.Bool)] bool fFullscreen);
 }
+
+/// <summary>The shell's virtual desktop manager (CLSID_VirtualDesktopManager).</summary>
+[ComImport, Guid("aa509086-5ca9-4c25-8f95-589d3c07b48a")]
+internal class VirtualDesktopManager;
+
+/// <summary>IVirtualDesktopManager. MoveWindowToDesktop only moves this process's own windows.</summary>
+[ComImport, Guid("a5cd92ff-29be-454c-8d04-d82879fb3f1b"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IVirtualDesktopManager
+{
+    [PreserveSig] int IsWindowOnCurrentVirtualDesktop(nint hwnd, [MarshalAs(UnmanagedType.Bool)] out bool onCurrentDesktop);
+    [PreserveSig] int GetWindowDesktopId(nint hwnd, out Guid desktopId);
+    [PreserveSig] int MoveWindowToDesktop(nint hwnd, in Guid desktopId);
+}
