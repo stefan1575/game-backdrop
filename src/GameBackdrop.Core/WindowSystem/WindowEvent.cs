@@ -11,6 +11,13 @@ public enum WindowEventKind
     LocationChanged,
     MinimizeStart,
     MinimizeEnd,
+    /// <summary>
+    /// The window was cloaked: still visible to Windows, but not drawn. Switching to another
+    /// virtual desktop cloaks the windows of the one left.
+    /// </summary>
+    Cloaked,
+    /// <summary>The window was uncloaked (switching back to its virtual desktop).</summary>
+    Uncloaked,
 }
 
 /// <param name="Lifetime">Which lifetime of <paramref name="Window"/> the event is about (see

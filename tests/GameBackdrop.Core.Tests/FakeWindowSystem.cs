@@ -172,6 +172,30 @@ public sealed class FakeWindowSystem : IWindowSystem
         if (activate) UserActivates(window);
     }
 
+    /// <summary>
+    /// The user switches to another virtual desktop: the window is cloaked (Cloaked), and the
+    /// foreground passes on if it had it. Windows cloaks the window about 100 ms after the
+    /// switch, so the window may get there first; a window cloaked earlier (before the app saw
+    /// it) is <see cref="FakeWindow.IsCloaked"/> set directly.
+    /// </summary>
+    public void Cloak(FakeWindow window)
+    {
+        window.IsCloaked = true;
+        Raise(WindowEventKind.Cloaked, window);
+        if (Foreground == window) PassForeground();
+    }
+
+    /// <summary>
+    /// The user switches back to the window's virtual desktop: it is uncloaked (Uncloaked), then,
+    /// unless <paramref name="activate"/> is false, it gets the foreground back.
+    /// </summary>
+    public void Uncloak(FakeWindow window, bool activate = true)
+    {
+        window.IsCloaked = false;
+        Raise(WindowEventKind.Uncloaked, window);
+        if (activate) UserActivates(window);
+    }
+
     /// <summary>The user (or the game) moves the window (LocationChanged).</summary>
     public void Move(FakeWindow window, Rect outer)
     {
@@ -210,7 +234,7 @@ public sealed class FakeWindowSystem : IWindowSystem
     private void PassForeground()
     {
         var leaving = Foreground;
-        Foreground = _zOrder.OfType<FakeWindow>().FirstOrDefault(w => w.IsVisible && !w.IsMinimized && w != leaving);
+        Foreground = _zOrder.OfType<FakeWindow>().FirstOrDefault(w => w.IsVisible && !w.IsMinimized && !w.IsCloaked && w != leaving);
         if (Foreground is not null) Raise(WindowEventKind.Foreground, Foreground);
     }
 
@@ -350,7 +374,7 @@ public sealed class FakeWindowSystem : IWindowSystem
         if (w is null) return null;
         if (!_lifetimes.TryGetValue(handle, out var lifetime)) _lifetimes[handle] = lifetime = w.Lifetime;
         return new WindowInfo(w.Handle, lifetime, w.Process.Id, w.Process.ExePath, w.Process.Started, w.Outer, w.Client, w.Style,
-            w.IsVisible, w.IsMinimized, w.Owner is not null, MonitorOf(w.Outer));
+            w.IsVisible, w.IsMinimized, w.Owner is not null, MonitorOf(w.Outer), w.IsCloaked);
     }
 
     public Size OuterSizeFor(WindowHandle handle, WindowStyle style, Size clientSize)
@@ -644,6 +668,9 @@ public sealed class FakeWindow(WindowHandle handle, FakeProcess process, WindowS
     public Rect Outer { get; set; } = outer;
     public bool IsVisible { get; set; }
     public bool IsMinimized { get; set; }
+
+    /// <summary>Cloaked by DWM: visible, but not drawn (on another virtual desktop).</summary>
+    public bool IsCloaked { get; set; }
     public bool IsGone { get; set; }
 
     /// <summary>The shell has been told this window is fullscreen (MarkFullscreen).</summary>

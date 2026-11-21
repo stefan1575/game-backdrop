@@ -21,6 +21,8 @@ public sealed record WindowFrame(WindowStyle Style, Rect Outer);
 /// <param name="Client">The client area in screen coordinates.</param>
 /// <param name="IsOwned">True when the window has an owner (dialogs, tool palettes).</param>
 /// <param name="Monitor">The monitor the window is on (nearest one).</param>
+/// <param name="IsCloaked">True while the window is cloaked: visible, but not drawn (it is on
+/// another virtual desktop than the one shown).</param>
 public sealed record WindowInfo(
     WindowHandle Handle,
     long Lifetime,
@@ -33,7 +35,8 @@ public sealed record WindowInfo(
     bool IsVisible,
     bool IsMinimized,
     bool IsOwned,
-    MonitorInfo Monitor)
+    MonitorInfo Monitor,
+    bool IsCloaked = false)
 {
     public WindowFrame Frame => new(Style, Outer);
 }

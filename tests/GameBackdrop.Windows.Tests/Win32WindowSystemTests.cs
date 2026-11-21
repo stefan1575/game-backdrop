@@ -422,6 +422,37 @@ public sealed class Win32WindowSystemTests : IDisposable
     }
 
     [Fact]
+    public void Cloaking_a_window_raises_Cloaked_and_uncloaking_it_raises_Uncloaked_and_Describe_says_which_it_is()
+    {
+        // A switch to another virtual desktop cloaks a window; switching desktops in a test would
+        // move the signed-in user's screen, so the test window cloaks itself instead (C), which
+        // only a window's own process may do.
+        var handle = new WindowHandle(_hwnd);
+        var lifetime = _windows.Describe(handle)!.Lifetime;
+        Assert.False(_windows.Describe(handle)!.IsCloaked);
+
+        Assert.True(PostMessage(_hwnd, WM_KEYDOWN, 'C', 0));
+
+        WaitFor(() =>
+        {
+            _windows.Describe(handle); // takes in the queued window events
+            return _events.Contains(new WindowEvent(WindowEventKind.Cloaked, handle, lifetime)) ? 1 : 0;
+        }, "the Cloaked event");
+        var cloaked = _windows.Describe(handle)!;
+        Assert.True(cloaked.IsCloaked);
+        Assert.True(cloaked.IsVisible, "a cloaked window is still visible to Windows");
+
+        Assert.True(PostMessage(_hwnd, WM_KEYDOWN, 'C', 0));
+
+        WaitFor(() =>
+        {
+            _windows.Describe(handle);
+            return _events.Contains(new WindowEvent(WindowEventKind.Uncloaked, handle, lifetime)) ? 1 : 0;
+        }, "the Uncloaked event");
+        Assert.False(_windows.Describe(handle)!.IsCloaked);
+    }
+
+    [Fact]
     public void Marking_a_window_fullscreen_and_back_succeeds()
     {
         // xUnit 2 has no runtime skip: with no shell taskbar (a CI runner without Explorer) there
@@ -585,6 +616,7 @@ public sealed class Win32WindowSystemTests : IDisposable
     private const int GWL_EXSTYLE = -20;
     private const uint GW_HWNDNEXT = 2;
     private const uint WS_EX_TOPMOST = 0x8, WS_EX_TOOLWINDOW = 0x80, WS_EX_NOACTIVATE = 0x08000000;
+    private const uint WM_KEYDOWN = 0x0100;
     private const uint WM_MOUSEACTIVATE = 0x0021, WM_LBUTTONDOWN = 0x0201, WM_RBUTTONDOWN = 0x0204, WM_MBUTTONDOWN = 0x0207;
     private const uint HTCLIENT = 1;
     private const nint MA_NOACTIVATE = 3;

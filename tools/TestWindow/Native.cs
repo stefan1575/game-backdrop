@@ -22,6 +22,7 @@ internal static class Native
     public const int TRANSPARENT = 1;
     public const int IDC_ARROW = 32512;
     public const uint MF_STRING = 0x0000;
+    public const uint DWMWA_CLOAK = 13;
     public static readonly nint DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4;
 
     public delegate nint WndProc(nint hwnd, uint msg, nint wParam, nint lParam);
@@ -81,6 +82,7 @@ internal static class Native
     }
 
     [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(nint value);
+    [DllImport("dwmapi.dll")] public static extern int DwmSetWindowAttribute(nint hwnd, uint attribute, ref int value, int size);
     [DllImport("user32.dll")] public static extern uint GetDpiForSystem();
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] public static extern nint GetModuleHandle(string? name);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern ushort RegisterClassEx(ref WNDCLASSEX wc);
