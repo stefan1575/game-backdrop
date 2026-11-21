@@ -7,7 +7,9 @@ namespace TestWindow;
 /// A stand-in game for checking Game Backdrop's real Win32 path without a game. It is a plain
 /// Win32 window (no WinForms, which re-applies its own bounds when another process restyles it),
 /// so it behaves like a typical game window. List this exe in the settings file, then switch it
-/// with keys: W windowed, F borderless fullscreen, R next size, Esc quit. <c>--menu</c> gives it
+/// with keys: W windowed, F borderless fullscreen, R next size, C cloak or uncloak, Esc quit.
+/// C stands in for a switch to another virtual desktop, which cloaks a window (only a window's
+/// own process may cloak it, so the test window does it itself). <c>--menu</c> gives it
 /// a menu bar, like many visual novels have; <c>--menu-items N</c> gives it N menu items, so a
 /// narrow window's menu bar wraps onto more than one row. Like a game, it draws at its own
 /// resolution: the client size it last set itself, outlined in yellow, so a screenshot shows at
@@ -22,6 +24,7 @@ internal static class Program
     private static int _nextSize;
     private static nint _brush;
     private static bool _hasMenu;
+    private static bool _cloaked;
     private static RECT _rendered; // the client area the window last sized itself to: what it "renders"
 
     [STAThread]
@@ -79,6 +82,7 @@ internal static class Program
                     case 'W': MakeWindowed(hwnd); break;
                     case 'F': MakeBorderlessFullscreen(hwnd); break;
                     case 'R': NextSize(hwnd); break;
+                    case 'C': ToggleCloak(hwnd); break;
                     case VK_ESCAPE: DestroyWindow(hwnd); break;
                 }
                 return 0;
@@ -115,6 +119,13 @@ internal static class Program
         GetClientRect(hwnd, out _rendered);
     }
 
+    private static void ToggleCloak(nint hwnd)
+    {
+        _cloaked = !_cloaked;
+        var cloak = _cloaked ? 1 : 0;
+        DwmSetWindowAttribute(hwnd, DWMWA_CLOAK, ref cloak, sizeof(int));
+    }
+
     /// <summary>Change the client size and keep the current frame, the way a game's resolution change would.</summary>
     private static void NextSize(nint hwnd)
     {
@@ -138,7 +149,7 @@ internal static class Program
         GetWindowRect(hwnd, out var outer);
         GetClientRect(hwnd, out var client);
         var style = (uint)GetWindowLongPtr(hwnd, GWL_STYLE);
-        var text = $"Game Backdrop test window\n\nW windowed   F borderless fullscreen   R next size   Esc quit\n\n" +
+        var text = $"Game Backdrop test window\n\nW windowed   F borderless fullscreen   R next size   C cloak   Esc quit\n\n" +
                    $"Outer ({outer.Left},{outer.Top})-({outer.Right},{outer.Bottom})\nClient {client.Right}x{client.Bottom}\nStyle 0x{style:X8}\n\n" +
                    $"Renders at {_rendered.Right}x{_rendered.Bottom} (the yellow frame)";
         var border = CreateSolidBrush(0x0000D7FF); // yellow (BGR)
