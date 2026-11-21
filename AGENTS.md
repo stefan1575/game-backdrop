@@ -35,11 +35,6 @@ beside a normal TestWindow. Windows refuses its restyle with the same access den
 game gives a normal app, though a Low app's tray notice may not show. Start it detached
 (`cmd /c start`): a shell call that starts it directly can hang.
 
-Screenshots (a visible change needs a before and after): use the evidence harness on the
-`evidence` branch (`harness/README.md`). Add a scenario for the PR, run it on `main` for `before-`
-and on the PR for `after-`. Never capture the whole desktop: it shows other programs.
-A state a script can't reach (a UAC prompt) is `Screenshot owed: <why>`.
-
 Layout: `src/GameBackdrop.Core` (no Win32: settings, game list, classifier, placement, and the
 `BackdropController` over the `IWindowSystem` port, and `StartAtLogon` over the
 `IStartupShortcut` port), `src/GameBackdrop.Windows` (the Win32
