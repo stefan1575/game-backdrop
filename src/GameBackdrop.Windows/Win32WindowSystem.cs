@@ -23,6 +23,7 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
         (EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZEEND),
         (EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE),
         (EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE),
+        (EVENT_OBJECT_CLOAKED, EVENT_OBJECT_UNCLOAKED),
     ];
 
     private readonly SynchronizationContext _context;
@@ -112,7 +113,8 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
             IsWindowVisible(hwnd),
             IsIconic(hwnd),
             GetWindow(hwnd, GW_OWNER) != 0,
-            new MonitorInfo(new MonitorHandle(monitor), ToRect(monitorInfo.rcMonitor), ToRect(monitorInfo.rcWork)));
+            new MonitorInfo(new MonitorHandle(monitor), ToRect(monitorInfo.rcMonitor), ToRect(monitorInfo.rcWork)),
+            IsCloaked(hwnd));
     }
 
     public Size OuterSizeFor(WindowHandle window, WindowStyle style, Size clientSize)
@@ -395,6 +397,10 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
         }
     }
 
+    /// <summary>Whether DWM has the window cloaked, for any reason (another virtual desktop, its app, its owner).</summary>
+    private static bool IsCloaked(nint hwnd) =>
+        DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, out var cloaked, sizeof(int)) == 0 && cloaked != 0;
+
     private static Rect ToRect(RECT r) => new(r.Left, r.Top, r.Right, r.Bottom);
 
     private void OnWinEvent(nint hook, uint eventType, nint hwnd, int idObject, int idChild, uint thread, uint time)
@@ -410,6 +416,8 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
             case EVENT_OBJECT_LOCATIONCHANGE: kind = WindowEventKind.LocationChanged; break;
             case EVENT_SYSTEM_MINIMIZESTART: kind = WindowEventKind.MinimizeStart; break;
             case EVENT_SYSTEM_MINIMIZEEND: kind = WindowEventKind.MinimizeEnd; break;
+            case EVENT_OBJECT_CLOAKED: kind = WindowEventKind.Cloaked; break;
+            case EVENT_OBJECT_UNCLOAKED: kind = WindowEventKind.Uncloaked; break;
             default: return;
         }
         long lifetime;

@@ -50,7 +50,8 @@ public interface IWindowSystem
 
     /// <summary>
     /// A black backdrop window in the app's own process, created hidden. It never activates, and
-    /// it is in neither alt-tab nor the taskbar.
+    /// it is in neither alt-tab nor the taskbar. Windows shows such a window on every virtual
+    /// desktop, so it is hidden while its game is cloaked (on another desktop).
     /// </summary>
     BackdropHandle CreateBackdrop();
 

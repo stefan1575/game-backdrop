@@ -441,10 +441,14 @@ public sealed class BackdropController(IWindowSystem windows, GameList games, Ti
                 MarkAgain(tracked);
                 break;
             case WindowEventKind.MinimizeEnd:
+            case WindowEventKind.Uncloaked:
                 ShowBackdrop(tracked, info);
                 break;
             case WindowEventKind.MinimizeStart:
             case WindowEventKind.Hidden:
+            // Switching to another virtual desktop cloaks the game. The backdrop, a tool window,
+            // is on every desktop, so it would black out the one switched to.
+            case WindowEventKind.Cloaked:
                 windows.HideBackdrop(backdrop);
                 break;
         }
@@ -740,7 +744,7 @@ public sealed class BackdropController(IWindowSystem windows, GameList games, Ti
     /// Keep the cursor inside the game in front, or free it. It is kept inside a game's client
     /// area while that game is the foreground window, on screen, restyled and backdropped, with
     /// <see cref="GameEntry.KeepMouseInside"/> on; it follows the client area when that moves or
-    /// resizes. Anything else frees it: another app in front, the game minimised or hidden, its
+    /// resizes. Anything else frees it: another app in front, the game minimised, hidden or cloaked, its
     /// backdrop gone, the game closed. Decided from the desktop as it is now, not from the event
     /// that led here, so a late event never puts the clip on a game the user has left.
     /// </summary>
@@ -762,7 +766,7 @@ public sealed class BackdropController(IWindowSystem windows, GameList games, Ti
         if (!_running || windows.ForegroundWindow() is not { } foreground) return null;
         if (!TryGetLive(foreground, out var tracked, out var info)) return null;
         if (!tracked.IsRestyledNow || tracked.Backdrop is null || !tracked.Game.KeepMouseInside) return null;
-        if (!info.IsVisible || info.IsMinimized) return null;
+        if (!OnScreen(info)) return null;
         return new CursorClip(tracked.Window, tracked.Lifetime, info.Client);
     }
 
@@ -796,12 +800,18 @@ public sealed class BackdropController(IWindowSystem windows, GameList games, Ti
             _tracked[tracked.Window] = tracked with { MarkedFullscreen = true };
     }
 
-    /// <summary>Show the game's backdrop over its monitor, directly behind it, if the game is on screen.</summary>
+    /// <summary>
+    /// Show the game's backdrop over its monitor, directly behind it, if the game is on screen. A
+    /// cloaked game (on another virtual desktop) isn't: its Uncloaked event shows the backdrop.
+    /// </summary>
     private void ShowBackdrop(TrackedWindow tracked, WindowInfo info)
     {
-        if (tracked.Backdrop is { } backdrop && info.IsVisible && !info.IsMinimized)
+        if (tracked.Backdrop is { } backdrop && OnScreen(info))
             windows.ShowBackdrop(backdrop, tracked.Monitor.Bounds, tracked.Window);
     }
+
+    /// <summary>Shown, not minimised and not cloaked: the game is drawn on the desktop the user is on.</summary>
+    private static bool OnScreen(WindowInfo info) => info.IsVisible && !info.IsMinimized && !info.IsCloaked;
 
     /// <summary>
     /// The window moved or changed its size or style: follow what the game did. A tracked game
