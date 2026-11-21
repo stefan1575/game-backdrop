@@ -178,82 +178,9 @@ public sealed class Win32WindowSystemTests : IDisposable
         Assert.True(IsWindowVisible(hwnd));
         Assert.Equal(hwnd, NextVisibleBelow(_hwnd));
         var exStyle = (uint)GetWindowLongPtr(hwnd, GWL_EXSTYLE);
-        var owner = GetWindow(hwnd, GW_OWNER);
-        Assert.True(owner != 0 && !IsWindowVisible(owner), "owned by a hidden window: not in alt-tab or the taskbar");
-        Assert.True((exStyle & (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)) == 0, "neither style, which would put it on every virtual desktop");
+        Assert.True((exStyle & WS_EX_NOACTIVATE) != 0, "not activated by clicks");
+        Assert.True((exStyle & WS_EX_TOOLWINDOW) != 0, "not in alt-tab or the taskbar");
         Assert.True((exStyle & WS_EX_TOPMOST) == 0, "never topmost");
-    }
-
-    [Fact]
-    public void A_backdrop_is_on_the_virtual_desktop_of_the_window_it_is_behind_and_no_other()
-    {
-        // A window no virtual desktop holds is shown on every one: another desktop would be
-        // blacked out wherever the backdrop is above its windows.
-        var bounds = _windows.Describe(new WindowHandle(_hwnd))!.Monitor.Bounds;
-        var backdrop = _windows.CreateBackdrop();
-
-        _windows.ShowBackdrop(backdrop, bounds, new WindowHandle(_hwnd));
-
-        Pump();
-        var desktops = (IVirtualDesktopManager)new VirtualDesktopManager();
-        Assert.Equal(0, desktops.GetWindowDesktopId(_hwnd, out var windowDesktop));
-        Assert.Equal(0, desktops.GetWindowDesktopId(backdrop.Value, out var backdropDesktop));
-        Assert.NotEqual(Guid.Empty, backdropDesktop);
-        Assert.Equal(windowDesktop, backdropDesktop);
-    }
-
-    [Fact]
-    public void A_backdrop_shown_behind_a_window_on_another_virtual_desktop_goes_to_that_desktop()
-    {
-        // Windows puts a window on the desktop current when it is first shown. Only this process's
-        // windows can be moved between desktops, so the game here is one of the test's own.
-        var desktops = (IVirtualDesktopManager)new VirtualDesktopManager();
-        var game = CreateWindowEx(0, "STATIC", "Game Backdrop stand-in game", WS_POPUP | WS_VISIBLE, 100, 100, 320, 240, 0, 0, 0, 0);
-        try
-        {
-            Pump();
-            Assert.Equal(0, desktops.GetWindowDesktopId(game, out var current));
-            var other = VirtualDesktopIds().FirstOrDefault(d => d != current);
-            if (other == Guid.Empty)
-            {
-                NotChecked("this session has only one virtual desktop");
-                return;
-            }
-            Assert.Equal(0, desktops.MoveWindowToDesktop(game, other));
-            Pump();
-            var backdrop = _windows.CreateBackdrop();
-
-            _windows.ShowBackdrop(backdrop, new Rect(0, 0, 640, 480), new WindowHandle(game));
-
-            Pump();
-            Assert.Equal(0, desktops.GetWindowDesktopId(backdrop.Value, out var backdropDesktop));
-            Assert.Equal(other, backdropDesktop);
-            Assert.Equal(0, desktops.IsWindowOnCurrentVirtualDesktop(backdrop.Value, out var onCurrent));
-            Assert.False(onCurrent, "not shown on the desktop the user is on");
-        }
-        finally
-        {
-            DestroyWindow(game);
-        }
-    }
-
-    /// <summary>The session's virtual desktops, from Explorer's own record of them.</summary>
-    private static List<Guid> VirtualDesktopIds()
-    {
-        using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\VirtualDesktops");
-        if (key?.GetValue("VirtualDesktopIDs") is not byte[] ids) return [];
-        return Enumerable.Range(0, ids.Length / 16).Select(i => new Guid(ids.AsSpan(i * 16, 16))).ToList();
-    }
-
-    /// <summary>Run this thread's messages for a moment: the shell places a newly shown window on a desktop then.</summary>
-    private static void Pump()
-    {
-        var clock = Stopwatch.StartNew();
-        while (clock.ElapsedMilliseconds < 300)
-        {
-            while (PeekMessage(out var msg, 0, 0, 0, PM_REMOVE)) DispatchMessage(ref msg);
-            Thread.Sleep(10);
-        }
     }
 
     [Fact]
@@ -656,7 +583,7 @@ public sealed class Win32WindowSystemTests : IDisposable
 
     private const int SW_HIDE = 0, SW_MINIMIZE = 6, SW_RESTORE = 9;
     private const int GWL_EXSTYLE = -20;
-    private const uint GW_HWNDNEXT = 2, GW_OWNER = 4;
+    private const uint GW_HWNDNEXT = 2;
     private const uint WS_EX_TOPMOST = 0x8, WS_EX_TOOLWINDOW = 0x80, WS_EX_NOACTIVATE = 0x08000000;
     private const uint WM_MOUSEACTIVATE = 0x0021, WM_LBUTTONDOWN = 0x0201, WM_RBUTTONDOWN = 0x0204, WM_MBUTTONDOWN = 0x0207;
     private const uint HTCLIENT = 1;
@@ -701,15 +628,4 @@ public sealed class Win32WindowSystemTests : IDisposable
     [DllImport("user32.dll")] private static extern bool IsWindow(nint hwnd);
     [DllImport("user32.dll")] private static extern bool IsIconic(nint hwnd);
     [DllImport("user32.dll")] private static extern bool ShowWindow(nint hwnd, int command);
-
-    [ComImport, Guid("aa509086-5ca9-4c25-8f95-589d3c07b48a")]
-    private class VirtualDesktopManager;
-
-    [ComImport, Guid("a5cd92ff-29be-454c-8d04-d82879fb3f1b"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    private interface IVirtualDesktopManager
-    {
-        [PreserveSig] int IsWindowOnCurrentVirtualDesktop(nint hwnd, [MarshalAs(UnmanagedType.Bool)] out bool onCurrent);
-        [PreserveSig] int GetWindowDesktopId(nint hwnd, out Guid desktop);
-        [PreserveSig] int MoveWindowToDesktop(nint hwnd, in Guid desktop);
-    }
 }

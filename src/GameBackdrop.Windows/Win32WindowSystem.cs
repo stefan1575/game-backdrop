@@ -43,15 +43,6 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
     private static readonly ConcurrentDictionary<nint, Win32WindowSystem> BackdropOwners = new();
     private readonly HashSet<nint> _backdrops = [];
 
-    // A hidden window that owns every backdrop, made with the first one. An owned window gets no
-    // taskbar button and no Alt-Tab entry, which keeps the backdrop a plain popup: Windows puts a
-    // tool window (WS_EX_TOOLWINDOW) or a WS_EX_NOACTIVATE one on no virtual desktop, so it is
-    // shown on all of them, blacking out each desktop where it is above that desktop's windows.
-    private nint _backdropOwnerWindow;
-
-    // The shell's virtual desktop manager, created on first use on this thread.
-    private IVirtualDesktopManager? _desktops;
-
     // The cursor clip this port last set, as Windows applied it; null when it set none, or freed it.
     private RECT? _clipSet;
 
@@ -163,16 +154,8 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
 
     public BackdropHandle CreateBackdrop()
     {
-        if (_backdropOwnerWindow == 0)
-        {
-            _backdropOwnerWindow = CreateWindowEx(0, BackdropClassRegistered.Value, null, WS_POPUP,
-                0, 0, 0, 0, 0, 0, GetModuleHandle(null), 0);
-            if (_backdropOwnerWindow == 0) throw new InvalidOperationException($"CreateWindowEx(backdrop owner) failed: {Marshal.GetLastPInvokeError()}.");
-        }
-        // No WS_EX_NOACTIVATE either (see _backdropOwnerWindow): its window procedure refuses the
-        // activation a click would bring, and it is only ever shown with SWP_NOACTIVATE.
-        var hwnd = CreateWindowEx(0, BackdropClassRegistered.Value, null, WS_POPUP,
-            0, 0, 0, 0, _backdropOwnerWindow, 0, GetModuleHandle(null), 0);
+        var hwnd = CreateWindowEx(WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW, BackdropClassRegistered.Value, null, WS_POPUP,
+            0, 0, 0, 0, 0, 0, GetModuleHandle(null), 0);
         if (hwnd == 0) throw new InvalidOperationException($"CreateWindowEx(backdrop) failed: {Marshal.GetLastPInvokeError()}.");
         BackdropOwners[hwnd] = this;
         _backdrops.Add(hwnd);
@@ -208,27 +191,6 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
         // a game that turned topmost between the check and the call.
         if (IsTopmost(backdrop.Value))
             SetWindowPos(backdrop.Value, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
-        MoveToDesktopOf(backdrop.Value, behind.Value);
-    }
-
-    /// <summary>
-    /// Put the backdrop on the game's virtual desktop. Windows puts a window on the desktop that is
-    /// current when it is first shown, which is not the game's when the user has switched away.
-    /// </summary>
-    private void MoveToDesktopOf(nint backdrop, nint window)
-    {
-        try
-        {
-            _desktops ??= (IVirtualDesktopManager)new VirtualDesktopManager();
-            if (_desktops.GetWindowDesktopId(window, out var desktop) != 0 || desktop == Guid.Empty) return;
-            if (_desktops.GetWindowDesktopId(backdrop, out var current) == 0 && current == desktop) return;
-            _desktops.MoveWindowToDesktop(backdrop, desktop);
-        }
-        catch (Exception e) when (e is COMException or InvalidCastException or UnauthorizedAccessException)
-        {
-            // No shell, or Explorer restarted since: create the manager again next time.
-            _desktops = null;
-        }
     }
 
     private static bool IsTopmost(nint hwnd) => ((uint)GetWindowLongPtr(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
@@ -316,12 +278,8 @@ public sealed class Win32WindowSystem : IWindowSystem, IDisposable
         // The controller frees the cursor when it stops; this is the backstop if it never did.
         ReleaseCursor();
         foreach (var backdrop in _backdrops.ToList()) DestroyBackdrop(new BackdropHandle(backdrop));
-        if (_backdropOwnerWindow != 0) DestroyWindow(_backdropOwnerWindow);
-        _backdropOwnerWindow = 0;
         if (_taskbar is not null) Marshal.ReleaseComObject(_taskbar);
         _taskbar = null;
-        if (_desktops is not null) Marshal.ReleaseComObject(_desktops);
-        _desktops = null;
     }
 
     private static string RegisterBackdropClass()
