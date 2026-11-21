@@ -1,0 +1,68 @@
+[
+  {
+    "name": "desktops",
+    "when": "on the game\u0027s desktop",
+    "game": {
+      "desktop": "79639f86-ee89-45fb-a0ca-143cef983bf7",
+      "onCurrentDesktop": true,
+      "cloaked": 0,
+      "visible": true
+    },
+    "backdrop": {
+      "desktop": "none (0x8002802B)",
+      "onCurrentDesktop": true,
+      "cloaked": 0,
+      "visible": true
+    }
+  },
+  {
+    "name": "desktops",
+    "when": "on a new, empty desktop",
+    "game": {
+      "desktop": "79639f86-ee89-45fb-a0ca-143cef983bf7",
+      "onCurrentDesktop": false,
+      "cloaked": 2,
+      "visible": true
+    },
+    "backdrop": {
+      "desktop": "none (0x8002802B)",
+      "onCurrentDesktop": true,
+      "cloaked": 0,
+      "visible": true
+    }
+  },
+  {
+    "name": "before-empty-desktop",
+    "blackShareMonitor": "99.84% of 3686400 px",
+    "blackShareAboveTaskbar": "99.84% of 3563520 px",
+    "blackShareTaskbarStrip": "100.00% of 122880 px",
+    "backdropShownHere": true,
+    "taskbarAboveBackdrop": false,
+    "otherWindowsMasked": 0,
+    "picture": "before-empty-desktop.png: screen capture (CopyFromScreen) of the new desktop\u0027s monitor, pixelated, taskbar masked"
+  },
+  {
+    "name": "desktops",
+    "when": "back on the game\u0027s desktop",
+    "game": {
+      "desktop": "79639f86-ee89-45fb-a0ca-143cef983bf7",
+      "onCurrentDesktop": true,
+      "cloaked": 0,
+      "visible": true
+    },
+    "backdrop": {
+      "desktop": "none (0x8002802B)",
+      "onCurrentDesktop": true,
+      "cloaked": 0,
+      "visible": true
+    }
+  },
+  {
+    "name": "cloak events",
+    "events": [
+      "0 ms: watching",
+      "110 ms: game cloaked",
+      "5128 ms: game uncloaked"
+    ]
+  }
+]

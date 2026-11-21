@@ -860,6 +860,102 @@ try
         for (var i = 0; i < 100 && !File.Exists(Path.Combine(signals, "stopped")); i++) Thread.Sleep(100);
         Console.WriteLine("elevated helper stopped the test window and the elevated copy");
     }
+    else if (scenario == "desktops")
+    {
+        // #40 (PR #41): a windowed game with its backdrop on one virtual desktop; the harness makes a
+        // new, empty desktop (Ctrl+Win+D), captures its monitor, closes it (Ctrl+Win+F4) and goes
+        // back to the game's desktop. Also logs the game's cloak events (EVENT_OBJECT_CLOAKED).
+        var prefix = args.Length > 5 ? args[5] : "shot";
+        var game = WaitWindow(Launch(testExe, "--size 1280x720"));
+        var s0 = W.Describe(game).Style;
+        var app = Launch(appExe, $"--settings \"{settingsPath}\"");
+        WaitChanged(game, s0);
+        Console.WriteLine($"game activated: {W.EnsureForeground(game)}");
+        WaitBackdrop(app.Id);
+        Console.WriteLine($"game after restyle: style 0x{W.Describe(game).Style:X8} {W.Describe(game).Outer}");
+        var backdrop = W.Backdrops(app.Id).First(W.IsVisible);
+        V.Watch(game, backdrop);
+        void Desk(string when)
+        {
+            var m = new Dictionary<string, object?>
+            {
+                ["name"] = "desktops", ["when"] = when,
+                ["game"] = V.State(game), ["backdrop"] = V.State(backdrop),
+            };
+            log.Add(m); Console.WriteLine($"{when}: {JsonSerializer.Serialize(m)}");
+        }
+        Desk("on the game's desktop");
+        V.Chord(0x44); // Ctrl+Win+D: a new desktop, and switch to it
+        for (var i = 0; i < 50 && V.OnCurrent(game) != false; i++) Thread.Sleep(100);
+        Thread.Sleep(1500); // the switch animation
+        Desk("on a new, empty desktop");
+        var mon = screen.Bounds; var work = screen.WorkingArea;
+        using (var shot = new Bitmap(mon.Width, mon.Height, PixelFormat.Format32bppArgb))
+        {
+            using (var g = Graphics.FromImage(shot)) g.CopyFromScreen(mon.Left, mon.Top, 0, 0, mon.Size);
+            var strip = new Rectangle(0, work.Bottom - mon.Top, mon.Width, mon.Bottom - work.Bottom);
+            var m = new Dictionary<string, object?>
+            {
+                ["name"] = prefix + "-empty-desktop",
+                ["blackShareMonitor"] = W.BlackShare(shot, (_, _) => true),
+                ["blackShareAboveTaskbar"] = W.BlackShare(shot, (x, y) => !strip.Contains(x, y)),
+                ["blackShareTaskbarStrip"] = W.BlackShare(shot, (x, y) => strip.Contains(x, y)),
+            };
+            // What else is on screen: visible, uncloaked windows over this monitor that sit above the
+            // backdrop (all of them when the backdrop isn't shown here), the desktop itself excepted.
+            var backdropShown = V.Cloak(backdrop) == 0 && W.IsVisible(backdrop);
+            var shell = new[] { "Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd" };
+            var foreign = V.OnScreen().Where(h => h != backdrop && !shell.Contains(W.ClassOf(h)) && W.Intersects(h, mon)
+                && (!backdropShown || W.ZIndex(h) < W.ZIndex(backdrop))).ToList();
+            // A click-through overlay over the whole monitor (WS_EX_LAYERED, as screen-recording and
+            // GPU overlays are) draws nothing of its own here; masking it would hide the whole picture.
+            bool Overlay(nint h) { var d = W.Describe(h); return (d.Ex & 0x80000) != 0 && d.Outer.Width >= mon.Width - 1 && d.Outer.Height >= mon.Height; }
+            m["overlaysNotMasked"] = foreign.Where(Overlay).Select(h => W.ClassOf(h)).ToList();
+            m["otherWindowsMaskedClasses"] = foreign.Where(h => !Overlay(h)).Select(h => W.ClassOf(h)).ToList();
+            foreign = foreign.Where(h => !Overlay(h)).ToList();
+            var tray = W.FindTray();
+            var taskbarShown = !backdropShown || W.ZIndex(tray) < W.ZIndex(backdrop);
+            m["backdropShownHere"] = backdropShown;
+            m["taskbarAboveBackdrop"] = taskbarShown;
+            m["otherWindowsMasked"] = foreign.Count;
+            V.Pixelate(shot, 40); // wallpaper and desktop icons unreadable; pure black stays pure black
+            using (var g = Graphics.FromImage(shot))
+            {
+                using var label = new Font("Segoe UI", 16);
+                using var maskBrush = new SolidBrush(Color.FromArgb(70, 70, 76));
+                if (taskbarShown)
+                {
+                    g.FillRectangle(maskBrush, strip);
+                    g.DrawString("taskbar (masked)", label, Brushes.White, 20, strip.Top + 10);
+                }
+                foreach (var h in foreign)
+                {
+                    var r = W.Describe(h).Outer;
+                    g.FillRectangle(maskBrush, r.X - mon.Left, r.Y - mon.Top, r.Width, r.Height);
+                    g.DrawString("other window (masked)", label, Brushes.White, r.X - mon.Left + 8, r.Y - mon.Top + 8);
+                }
+                using var font = new Font("Segoe UI", 20, FontStyle.Bold);
+                using var small = new Font("Consolas", 15);
+                var caption = prefix == "before" ? "Before (main): a new, empty virtual desktop while a windowed game runs on another"
+                    : "After (PR #41): a new, empty virtual desktop while a windowed game runs on another";
+                g.FillRectangle(Brushes.Black, 20, 16, mon.Width - 40, 110);
+                g.DrawString(caption, font, Brushes.White, 30, 24);
+                g.DrawString($"Screen capture (CopyFromScreen), then pixelated (40 px blocks); taskbar{(foreign.Count > 0 ? " and other windows" : "")} masked. Captions drawn after measuring.", small, Brushes.LightGray, 30, 64);
+                g.DrawString($"pure black: above the taskbar {m["blackShareAboveTaskbar"]}   backdrop shown here: {backdropShown}", small, Brushes.LightGray, 30, 90);
+            }
+            m["picture"] = $"{prefix}-empty-desktop.png: screen capture (CopyFromScreen) of the new desktop's monitor, pixelated, taskbar" + (foreign.Count > 0 ? " and other windows" : "") + " masked";
+            shot.Save(Path.Combine(outDir, prefix + "-empty-desktop.png"), ImageFormat.Png);
+            log.Add(m); Console.WriteLine($"{m["name"]}: {JsonSerializer.Serialize(m)}");
+        }
+        V.Chord(0x73); // Ctrl+Win+F4: close the new desktop
+        Thread.Sleep(1200);
+        for (var i = 0; i < 10 && V.OnCurrent(game) == false; i++) { V.Chord(0x25); Thread.Sleep(900); } // Ctrl+Win+Left
+        Thread.Sleep(800);
+        Desk("back on the game's desktop");
+        log.Add(new { name = "cloak events", events = V.Events() });
+        Console.WriteLine($"cloak events: {string.Join("; ", V.Events())}");
+        Quit(app);
+    }
     else if (scenario == "wrap")
     {
         var wrap = WaitWindow(Launch(testExe, "--size 400x600 --menu-items 14"));
@@ -1217,5 +1313,94 @@ static class U
         canvas.Save(path, ImageFormat.Png);
         window.Dispose();
         Console.WriteLine($"saved {path}");
+    }
+}
+
+// Virtual desktops (#40): the shell's public IVirtualDesktopManager, desktop-switch keys, and a
+// WinEvent hook that logs when the game and its backdrop are cloaked or uncloaked.
+static class V
+{
+    [ComImport, Guid("aa509086-5ca9-4c25-8f95-589d3c07b48a")] class VirtualDesktopManager;
+    [ComImport, Guid("a5cd92ff-29be-454c-8d04-d82879fb3f1b"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IVirtualDesktopManager
+    {
+        [PreserveSig] int IsWindowOnCurrentVirtualDesktop(nint hwnd, [MarshalAs(UnmanagedType.Bool)] out bool on);
+        [PreserveSig] int GetWindowDesktopId(nint hwnd, out Guid id);
+        [PreserveSig] int MoveWindowToDesktop(nint hwnd, in Guid id);
+    }
+    static readonly IVirtualDesktopManager Vdm = (IVirtualDesktopManager)new VirtualDesktopManager();
+
+    public static bool? OnCurrent(nint h) => Vdm.IsWindowOnCurrentVirtualDesktop(h, out var on) == 0 ? on : null;
+    public static string DesktopOf(nint h)
+    {
+        var hr = Vdm.GetWindowDesktopId(h, out var id);
+        return hr != 0 ? $"none (0x{hr:X8})" : id == Guid.Empty ? "none (empty GUID)" : id.ToString();
+    }
+    [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(nint h, int attr, out int v, int size);
+    public static int Cloak(nint h) => DwmGetWindowAttribute(h, 14, out var v, 4) == 0 ? v : -1; // DWMWA_CLOAKED
+    public static object State(nint h) => new { desktop = DesktopOf(h), onCurrentDesktop = OnCurrent(h), cloaked = Cloak(h), visible = W.IsVisible(h) };
+
+    [DllImport("user32.dll")] static extern void keybd_event(byte vk, byte scan, uint flags, nint extra);
+    /// <summary>Ctrl+Win+key.</summary>
+    public static void Chord(byte key)
+    {
+        keybd_event(0x5B, 0, 1, 0); keybd_event(0x11, 0, 0, 0); // LWIN (extended), CTRL
+        keybd_event(key, 0, key is 0x25 ? 1u : 0u, 0); Thread.Sleep(40); keybd_event(key, 0, key is 0x25 ? 3u : 2u, 0);
+        keybd_event(0x11, 0, 2, 0); keybd_event(0x5B, 0, 3, 0);
+    }
+
+    delegate bool EnumProc(nint h, nint l);
+    [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc p, nint l);
+    public static List<nint> OnScreen()
+    {
+        var list = new List<nint>();
+        EnumWindows((h, _) => { if (W.IsVisible(h) && Cloak(h) == 0) list.Add(h); return true; }, 0);
+        return list;
+    }
+
+    delegate void WinEventProc(nint hook, uint ev, nint hwnd, int obj, int child, uint thread, uint time);
+    [DllImport("user32.dll")] static extern nint SetWinEventHook(uint min, uint max, nint mod, WinEventProc proc, uint pid, uint thread, uint flags);
+    static WinEventProc? _proc;
+    static readonly List<string> _events = [];
+    static readonly Stopwatch _clock = Stopwatch.StartNew();
+    public static List<string> Events() { lock (_events) return [.. _events]; }
+    /// <summary>Logs EVENT_OBJECT_CLOAKED / UNCLOAKED for the two windows, from a thread pumping messages.</summary>
+    public static void Watch(nint game, nint backdrop)
+    {
+        var ready = new ManualResetEventSlim();
+        var t = new Thread(() =>
+        {
+            _proc = (_, ev, hwnd, obj, _, _, _) =>
+            {
+                if (obj != 0 || (hwnd != game && hwnd != backdrop)) return;
+                lock (_events) _events.Add($"{_clock.ElapsedMilliseconds} ms: {(hwnd == game ? "game" : "backdrop")} {(ev == 0x8017 ? "cloaked" : "uncloaked")}");
+            };
+            SetWinEventHook(0x8017, 0x8018, 0, _proc, 0, 0, 0); // OUTOFCONTEXT
+            ready.Set();
+            Application.Run();
+        }) { IsBackground = true };
+        t.SetApartmentState(ApartmentState.STA); t.Start(); ready.Wait(5000);
+        lock (_events) _events.Add($"{_clock.ElapsedMilliseconds} ms: watching");
+    }
+
+    /// <summary>Each block becomes its average colour, except that a block that is all pure black stays so.</summary>
+    public static void Pixelate(Bitmap bmp, int block)
+    {
+        var data = bmp.LockBits(new Rectangle(0, 0, bmp.Width, bmp.Height), ImageLockMode.ReadWrite, PixelFormat.Format32bppArgb);
+        var px = new int[bmp.Width * bmp.Height];
+        Marshal.Copy(data.Scan0, px, 0, px.Length);
+        for (var by = 0; by < bmp.Height; by += block)
+            for (var bx = 0; bx < bmp.Width; bx += block)
+            {
+                long r = 0, g = 0, b = 0, n = 0;
+                for (var y = by; y < Math.Min(by + block, bmp.Height); y++)
+                    for (var x = bx; x < Math.Min(bx + block, bmp.Width); x++)
+                    { var p = px[y * bmp.Width + x]; r += (p >> 16) & 255; g += (p >> 8) & 255; b += p & 255; n++; }
+                var avg = unchecked((int)0xFF000000) | (int)(r / n) << 16 | (int)(g / n) << 8 | (int)(b / n);
+                for (var y = by; y < Math.Min(by + block, bmp.Height); y++)
+                    for (var x = bx; x < Math.Min(bx + block, bmp.Width); x++) px[y * bmp.Width + x] = avg;
+            }
+        Marshal.Copy(px, 0, data.Scan0, px.Length);
+        bmp.UnlockBits(data);
     }
 }

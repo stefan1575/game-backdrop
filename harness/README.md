@@ -69,3 +69,14 @@ and black. Say which way each picture was made.
   `HKCU\Control Panel\NotifyIconSettings` entry (Windows 11 puts a new icon in the overflow),
   asks the shell for the icon's rect (`Shell_NotifyIconGetRect`, uID 1), copies just that rect
   from the screen, then stops the app and deletes the entry. Run on main's exe and the PR's.
+- `desktops` (#40, `pr-41/`): a windowed game with its backdrop on the current virtual desktop;
+  the harness makes a new, empty desktop with Ctrl+Win+D, captures that monitor, closes the desktop
+  with Ctrl+Win+F4 and steps back with Ctrl+Win+Left until the game's desktop is current. It logs
+  each window's desktop (`IVirtualDesktopManager`), its cloak state, and the game's and backdrop's
+  `EVENT_OBJECT_CLOAKED` / `UNCLOAKED` events. The capture shows the wallpaper, so it is pixelated
+  (40 px blocks) after the black shares are measured; the taskbar and other windows over the
+  monitor are masked, except full-monitor `WS_EX_LAYERED` overlays (GPU and cursor overlays), which
+  draw nothing there and would hide the whole picture. A sixth argument names the prefix (`before`
+  on main, `after` on the PR). It switches the signed-in user's desktop, and the test copy of the
+  app can't run beside a running copy (the single-instance mutex isn't scoped by `--settings`), so
+  quit the real one first.

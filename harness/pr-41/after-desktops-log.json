@@ -1,0 +1,78 @@
+[
+  {
+    "name": "desktops",
+    "when": "on the game\u0027s desktop",
+    "game": {
+      "desktop": "79639f86-ee89-45fb-a0ca-143cef983bf7",
+      "onCurrentDesktop": true,
+      "cloaked": 0,
+      "visible": true
+    },
+    "backdrop": {
+      "desktop": "79639f86-ee89-45fb-a0ca-143cef983bf7",
+      "onCurrentDesktop": true,
+      "cloaked": 0,
+      "visible": true
+    }
+  },
+  {
+    "name": "desktops",
+    "when": "on a new, empty desktop",
+    "game": {
+      "desktop": "79639f86-ee89-45fb-a0ca-143cef983bf7",
+      "onCurrentDesktop": false,
+      "cloaked": 2,
+      "visible": true
+    },
+    "backdrop": {
+      "desktop": "79639f86-ee89-45fb-a0ca-143cef983bf7",
+      "onCurrentDesktop": false,
+      "cloaked": 2,
+      "visible": true
+    }
+  },
+  {
+    "name": "after-empty-desktop",
+    "blackShareMonitor": "0.03% of 3686400 px",
+    "blackShareAboveTaskbar": "0.04% of 3563520 px",
+    "blackShareTaskbarStrip": "0.00% of 122880 px",
+    "overlaysNotMasked": [
+      "Cua.AgentCursorOverlay",
+      "CEF-OSC-WIDGET"
+    ],
+    "otherWindowsMaskedClasses": [
+      "com.pais.handy-sic",
+      "Tao Thread Event Target"
+    ],
+    "backdropShownHere": false,
+    "taskbarAboveBackdrop": true,
+    "otherWindowsMasked": 2,
+    "picture": "after-empty-desktop.png: screen capture (CopyFromScreen) of the new desktop\u0027s monitor, pixelated, taskbar and other windows masked"
+  },
+  {
+    "name": "desktops",
+    "when": "back on the game\u0027s desktop",
+    "game": {
+      "desktop": "79639f86-ee89-45fb-a0ca-143cef983bf7",
+      "onCurrentDesktop": true,
+      "cloaked": 0,
+      "visible": true
+    },
+    "backdrop": {
+      "desktop": "79639f86-ee89-45fb-a0ca-143cef983bf7",
+      "onCurrentDesktop": true,
+      "cloaked": 0,
+      "visible": true
+    }
+  },
+  {
+    "name": "cloak events",
+    "events": [
+      "0 ms: watching",
+      "97 ms: game cloaked",
+      "97 ms: backdrop cloaked",
+      "5090 ms: game uncloaked",
+      "5091 ms: backdrop uncloaked"
+    ]
+  }
+]
